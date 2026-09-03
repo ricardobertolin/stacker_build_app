@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Block Stacker — wooden blocks with physics</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1410; color: #f4ead8; font-family: system-ui, sans-serif; }
+  #ui {
+    position: absolute; top: 12px; left: 12px; pointer-events: none;
+    background: rgba(0,0,0,0.5); padding: 10px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.5; max-width: 320px;
+  }
+  #ui b { color: #f0c849; }
+  #stats { font-size: 16px; margin-bottom: 8px; color: #fff; }
+  #buttons {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px;
+  }
+  button.b {
+    pointer-events: auto; padding: 10px 18px; font-size: 14px; border: 0; border-radius: 8px;
+    background: #f0c849; color: #1a1410; cursor: pointer; font-weight: 600;
+    box-shadow: 0 2px 0 #b08c1d;
+  }
+  button.b:active { transform: translateY(1px); box-shadow: 0 1px 0 #b08c1d; }
+  button.b.secondary { background: #6c757d; color: #fff; box-shadow: 0 2px 0 #495057; }
+  button.b.danger { background: #c0413a; color: #fff; box-shadow: 0 2px 0 #7a2922; }
+  #nextLabel {
+    position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.5);
+    padding: 8px 12px; border-radius: 8px; font-size: 13px;
+  }
+  #nextLabel b { color: #f0c849; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="stats">Pieces dropped: 0 &nbsp;|&nbsp; Tallest: 0.0</div>
+  <div><b>Move preview:</b> Arrows (camera-relative)</div>
+  <div><b>Raise / lower:</b> PageUp / PageDown</div>
+  <div><b>Rotate:</b> Q/E (Y), R/F (X)</div>
+  <div><b>Cycle piece:</b> N &nbsp; <b>Drop:</b> Space</div>
+  <div><b>Camera:</b> drag = orbit, wheel = zoom</div>
+</div>
+<div id="nextLabel">Next: <b id="nextName">cube</b></div>
+<div id="buttons">
+  <button class="b" id="dropBtn">Drop (Space)</button>
+  <button class="b secondary" id="nextBtn">Next piece (N)</button>
+  <button class="b danger" id="resetBtn">Reset</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as CANNON from 'cannon-es';
+
+// ---------- Three.js scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1410);
+scene.fog = new THREE.Fog(0x1a1410, 25, 70);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(7, 6, 9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.5, 0);
+controls.enableDamping = true;
+controls.minDistance = 4;
+controls.maxDistance = 30;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffe6c2, 0.4));
+const sun = new THREE.DirectionalLight(0xfff1d8, 1.0);
+sun.position.set(6, 14, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+const s = 12;
+sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
+sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xa0c4ff, 0.25);
+fill.position.set(-5, 4, -3);
+scene.add(fill);
+
+// Wooden table top
+const tableGeo = new THREE.BoxGeometry(12, 0.4, 12);
+const tableMat = new THREE.MeshStandardMaterial({ color: 0xc89968, roughness: 0.85 });
+const table = new THREE.Mesh(tableGeo, tableMat);
+table.position.y = -0.2;
+table.receiveShadow = true;
+scene.add(table);
+
+// ---------- Physics world ----------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -14, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
+world.solver.iterations = 12;
+
+const groundMat = new CANNON.Material('ground');
+const blockMat = new CANNON.Material('block');
+world.addContactMaterial(new CANNON.ContactMaterial(groundMat, blockMat, { friction: 0.6, restitution: 0.05 }));
+world.addContactMaterial(new CANNON.ContactMaterial(blockMat, blockMat, { friction: 0.55, restitution: 0.04 }));
+
+const groundBody = new CANNON.Body({ mass: 0, material: groundMat, shape: new CANNON.Plane() });
+groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+world.addBody(groundBody);
+
+// ---------- Color palette ----------
+const COLORS = [0xd04545, 0x3a82c4, 0xf0c849, 0x5fa84d];
+function randomColor() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+function makeWoodMat(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.02 });
+}
+
+// ---------- Piece factory ----------
+// Each piece function returns { mesh: Object3D, makeBody: (mass) => CANNON.Body }
+// Mesh and body both have their origin at the geometric/COM center.
+
+function makeCubePiece(color) {
+  const mat = makeWoodMat(color);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const makeBody = () => {
+    const b = new CANNON.Body({ mass: 1, material: blockMat });
+    b.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)));
+    return b;
+  };
+  return { mesh, makeBody, name: 'cube' };
+}
+
+function makeBlockPiece(color) {
+  const mat = makeWoodMat(color);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 0.8), mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const makeBody = () => {
+    const b = new CANNON.Body({ mass: 1.5, material: blockMat });
+    b.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.3, 0.4)));
+    return b;
+  };
+  return { mesh, makeBody, name: 'block' };
+}
+
+function makePrismPiece(color) {
+  // Triangular prism (roof): triangle in XY, extruded along Z. Centered around origin.
+  const mat = makeWoodMat(color);
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.7, -0.45);
+  shape.lineTo(0.7, -0.45);
+  shape.lineTo(0, 0.45);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
+  geo.translate(0, 0, -0.5); // center along Z
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const makeBody = () => {
+    const v = [
+      new CANNON.Vec3(-0.7, -0.45, -0.5),
+      new CANNON.Vec3( 0.7, -0.45, -0.5),
+      new CANNON.Vec3(-0.7, -0.45,  0.5),
+      new CANNON.Vec3( 0.7, -0.45,  0.5),
+      new CANNON.Vec3(   0,  0.45, -0.5),
+      new CANNON.Vec3(   0,  0.45,  0.5),
+    ];
+    const faces = [
+      [0, 1, 3, 2], // bottom (-Y)
+      [0, 4, 1],    // back tri (-Z)
+      [2, 3, 5],    // front tri (+Z)
+      [1, 4, 5, 3], // right slant
+      [0, 2, 5, 4], // left slant
+    ];
+    const poly = new CANNON.ConvexPolyhedron({ vertices: v, faces });
+    const b = new CANNON.Body({ mass: 1.2, material: blockMat });
+    b.addShape(poly);
+    return b;
+  };
+  return { mesh, makeBody, name: 'roof' };
+}
+
+function makeArchPiece(color) {
+  // Inverted-U arch: two posts + top crossbar. Compound body of 3 boxes, mesh group of 3.
+  const mat = makeWoodMat(color);
+  const group = new THREE.Group();
+  const parts = [
+    { sz: [0.3, 1.0, 0.6], pos: [-0.65, -0.2,  0] }, // left post
+    { sz: [0.3, 1.0, 0.6], pos: [ 0.65, -0.2,  0] }, // right post
+    { sz: [1.6, 0.4, 0.6], pos: [ 0.00,  0.5,  0] }, // top crossbar
+  ];
+  for (const p of parts) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(...p.sz), mat);
+    m.position.set(...p.pos);
+    m.castShadow = m.receiveShadow = true;
+    group.add(m);
+  }
+  const makeBody = () => {
+    const b = new CANNON.Body({ mass: 2.0, material: blockMat });
+    for (const p of parts) {
+      const half = new CANNON.Vec3(p.sz[0]/2, p.sz[1]/2, p.sz[2]/2);
+      b.addShape(new CANNON.Box(half), new CANNON.Vec3(...p.pos));
+    }
+    return b;
+  };
+  return { mesh: group, makeBody, name: 'arch' };
+}
+
+const PIECE_FACTORIES = [makeCubePiece, makeBlockPiece, makePrismPiece, makeArchPiece];
+
+function randomPiece() {
+  const f = PIECE_FACTORIES[Math.floor(Math.random() * PIECE_FACTORIES.length)];
+  return f(randomColor());
+}
+
+// ---------- Preview & dropping ----------
+const dropped = []; // { mesh, body }
+let preview = null;
+let previewIndex = 0;
+let previewColor = randomColor();
+let pieceCount = 0;
+let tallest = 0;
+
+const SPAWN_HEIGHT_DEFAULT = 5;
+let spawnY = SPAWN_HEIGHT_DEFAULT;
+const previewPos = new THREE.Vector3(0, SPAWN_HEIGHT_DEFAULT, 0);
+const previewQuat = new THREE.Quaternion();
+
+function spawnPreview(forceIndex = null) {
+  if (preview) {
+    scene.remove(preview.mesh);
+    preview = null;
+  }
+  if (forceIndex !== null) {
+    previewIndex = forceIndex;
+  } else {
+    previewIndex = Math.floor(Math.random() * PIECE_FACTORIES.length);
+    previewColor = randomColor();
+  }
+  preview = PIECE_FACTORIES[previewIndex](previewColor);
+  // Make preview semi-transparent so it's clearly the "ghost" piece
+  preview.mesh.traverse(o => {
+    if (o.isMesh) {
+      o.material = o.material.clone();
+      o.material.transparent = true;
+      o.material.opacity = 0.55;
+      o.castShadow = false;
+    }
+  });
+  preview.mesh.position.copy(previewPos);
+  preview.mesh.quaternion.copy(previewQuat);
+  scene.add(preview.mesh);
+  document.getElementById('nextName').textContent = preview.name;
+}
+
+function cyclePreview() {
+  previewIndex = (previewIndex + 1) % PIECE_FACTORIES.length;
+  previewColor = randomColor();
+  spawnPreview(previewIndex);
+}
+
+function dropPreview() {
+  if (!preview) return;
+  // Build the real piece (full opacity) at the preview's pose
+  const real = PIECE_FACTORIES[previewIndex](previewColor);
+  real.mesh.position.copy(preview.mesh.position);
+  real.mesh.quaternion.copy(preview.mesh.quaternion);
+  scene.add(real.mesh);
+
+  const body = real.makeBody();
+  body.position.set(real.mesh.position.x, real.mesh.position.y, real.mesh.position.z);
+  body.quaternion.set(real.mesh.quaternion.x, real.mesh.quaternion.y, real.mesh.quaternion.z, real.mesh.quaternion.w);
+  body.sleepSpeedLimit = 0.15;
+  body.sleepTimeLimit = 0.8;
+  world.addBody(body);
+
+  dropped.push({ mesh: real.mesh, body });
+  pieceCount++;
+  updateStats();
+
+  // Remove the preview, spawn a fresh one after a short beat
+  scene.remove(preview.mesh);
+  preview = null;
+  setTimeout(() => spawnPreview(), 250);
+}
+
+function resetAll() {
+  for (const p of dropped) {
+    scene.remove(p.mesh);
+    world.removeBody(p.body);
+  }
+  dropped.length = 0;
+  pieceCount = 0;
+  tallest = 0;
+  updateStats();
+  if (preview) { scene.remove(preview.mesh); preview = null; }
+  spawnY = SPAWN_HEIGHT_DEFAULT;
+  previewPos.set(0, spawnY, 0);
+  previewQuat.identity();
+  spawnPreview();
+}
+
+function updateStats() {
+  document.getElementById('stats').textContent =
+    `Pieces dropped: ${pieceCount}  |  Tallest: ${tallest.toFixed(1)}`;
+}
+
+// ---------- Camera-relative movement ----------
+function cameraAxes() {
+  const f = new THREE.Vector3();
+  camera.getWorldDirection(f);
+  f.y = 0;
+  if (f.lengthSq() < 1e-6) return { fwd: new THREE.Vector3(0, 0, 1), right: new THREE.Vector3(1, 0, 0) };
+  f.normalize();
+  const right = new THREE.Vector3(-f.z, 0, f.x); // -90° around Y
+  return { fwd: f, right };
+}
+
+function movePreview(dx, dz) {
+  if (!preview) return;
+  const { fwd, right } = cameraAxes();
+  previewPos.x += right.x * dx + fwd.x * dz;
+  previewPos.z += right.z * dx + fwd.z * dz;
+  // Keep over the table
+  previewPos.x = Math.max(-5, Math.min(5, previewPos.x));
+  previewPos.z = Math.max(-5, Math.min(5, previewPos.z));
+  preview.mesh.position.copy(previewPos);
+}
+
+function raisePreview(dy) {
+  spawnY = Math.max(1, Math.min(15, spawnY + dy));
+  previewPos.y = spawnY;
+  if (preview) preview.mesh.position.copy(previewPos);
+}
+
+function rotatePreview(axis) {
+  if (!preview) return;
+  const q = new THREE.Quaternion();
+  const ax = axis === 'x' ? new THREE.Vector3(1, 0, 0)
+           : axis === 'z' ? new THREE.Vector3(0, 0, 1)
+           : new THREE.Vector3(0, 1, 0);
+  q.setFromAxisAngle(ax, Math.PI / 2);
+  previewQuat.multiplyQuaternions(q, previewQuat);
+  preview.mesh.quaternion.copy(previewQuat);
+}
+
+// ---------- Input ----------
+addEventListener('keydown', (e) => {
+  switch (e.code) {
+    case 'ArrowUp':    movePreview(0,  0.5); e.preventDefault(); break;
+    case 'ArrowDown':  movePreview(0, -0.5); e.preventDefault(); break;
+    case 'ArrowRight': movePreview(0.5, 0);  e.preventDefault(); break;
+    case 'ArrowLeft':  movePreview(-0.5, 0); e.preventDefault(); break;
+    case 'PageUp':     raisePreview(0.5);    e.preventDefault(); break;
+    case 'PageDown':   raisePreview(-0.5);   e.preventDefault(); break;
+    case 'KeyQ': rotatePreview('y'); break;
+    case 'KeyE': rotatePreview('y'); rotatePreview('y'); rotatePreview('y'); break;
+    case 'KeyR': rotatePreview('x'); break;
+    case 'KeyF': rotatePreview('x'); rotatePreview('x'); rotatePreview('x'); break;
+    case 'KeyN': cyclePreview(); break;
+    case 'Space': dropPreview(); e.preventDefault(); break;
+  }
+});
+
+document.getElementById('dropBtn').addEventListener('click', dropPreview);
+document.getElementById('nextBtn').addEventListener('click', cyclePreview);
+document.getElementById('resetBtn').addEventListener('click', resetAll);
+
+// ---------- Resize ----------
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Main loop ----------
+const fixedStep = 1 / 60;
+let last = performance.now();
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  world.step(fixedStep, dt, 4);
+
+  let maxTop = 0;
+  for (const p of dropped) {
+    p.mesh.position.copy(p.body.position);
+    p.mesh.quaternion.copy(p.body.quaternion);
+    const y = p.body.position.y;
+    if (y > maxTop) maxTop = y;
+  }
+  if (Math.abs(maxTop - tallest) > 0.05) {
+    tallest = maxTop;
+    updateStats();
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ---------- Start ----------
+spawnPreview();
+updateStats();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

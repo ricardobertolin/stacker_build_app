@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>RealTetris 3D</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0d12; color: #e8eaed; font-family: system-ui, sans-serif; }
+  #ui {
+    position: absolute; top: 12px; left: 12px; pointer-events: none;
+    background: rgba(0,0,0,0.45); padding: 10px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.5;
+  }
+  #ui b { color: #7cc4ff; }
+  #score { font-size: 18px; margin-bottom: 6px; }
+  #gameover {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; background: rgba(0,0,0,0.6); pointer-events: auto;
+  }
+  #gameover h1 { margin: 0 0 12px 0; font-size: 42px; color: #ff6b6b; }
+  #gameover button {
+    pointer-events: auto; padding: 10px 22px; font-size: 16px; border: 0; border-radius: 6px;
+    background: #7cc4ff; color: #0b0d12; cursor: pointer;
+  }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="score">Score: 0 &nbsp;|&nbsp; Layers: 0</div>
+  <div><b>Move:</b> Arrows (camera-relative)</div>
+  <div><b>Rotate piece:</b> Q/E (Y) &nbsp; R/F (X) &nbsp; Z/X (Z)</div>
+  <div><b>Soft drop:</b> Shift &nbsp; <b>Hard drop:</b> Space</div>
+  <div><b>Orbit camera:</b> Mouse drag &nbsp; <b>Zoom:</b> Wheel</div>
+</div>
+<div id="gameover">
+  <h1>Game Over</h1>
+  <button onclick="location.reload()">Play again</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- Config ----------
+const W = 5, H = 14, D = 5;          // play area: width (x), height (y), depth (z)
+const FALL_MS = 800;                  // gravity tick
+const SOFT_FALL_MS = 60;
+
+// ---------- Scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d12);
+scene.fog = new THREE.Fog(0x0b0d12, 20, 60);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(W * 1.6, H * 0.9, D * 1.8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// Center the playfield so (0,0,0) grid sits centered horizontally at world (0..W, 0..H, 0..D)
+// We'll translate the whole field group so its center is at origin.
+const fieldOffset = new THREE.Vector3(-W / 2, 0, -D / 2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, H / 2.5, 0);
+controls.enableDamping = true;
+controls.minDistance = 8;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;  // don't go under the floor
+
+// ---------- Lights ----------
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(8, 18, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -20;
+sun.shadow.camera.right = 20;
+sun.shadow.camera.top = 20;
+sun.shadow.camera.bottom = -20;
+scene.add(sun);
+
+// ---------- Floor & cage ----------
+const floorGeo = new THREE.PlaneGeometry(W * 3, D * 3);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x1c2230, roughness: 0.95 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(W * 3, W * 3, 0x33405a, 0x222a3a);
+grid.position.y = 0.001;
+scene.add(grid);
+
+// Wireframe cage showing the play area
+const cageGeo = new THREE.BoxGeometry(W, H, D);
+const edges = new THREE.EdgesGeometry(cageGeo);
+const cage = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4a6ea8 }));
+cage.position.set(0, H / 2, 0);
+scene.add(cage);
+
+// Subtle base square right under the play area
+const baseGeo = new THREE.PlaneGeometry(W, D);
+const baseMat = new THREE.MeshStandardMaterial({ color: 0x2a3550, roughness: 0.9 });
+const base = new THREE.Mesh(baseGeo, baseMat);
+base.rotation.x = -Math.PI / 2;
+base.position.y = 0.01;
+base.receiveShadow = true;
+scene.add(base);
+
+// ---------- Game state ----------
+// grid3[x][y][z] = colorHex | null
+const grid3 = Array.from({ length: W }, () =>
+  Array.from({ length: H }, () => Array(D).fill(null))
+);
+
+// Piece definitions: each is array of [x,y,z] offsets.
+// Mix of flat tetrominoes (classic Tetris feel) and a couple of 3D variants.
+const PIECES = [
+  { name: 'I',     color: 0x35d6c8, cells: [[0,0,0],[1,0,0],[2,0,0],[3,0,0]] },
+  { name: 'O',     color: 0xf2d65a, cells: [[0,0,0],[1,0,0],[0,0,1],[1,0,1]] },
+  { name: 'T',     color: 0xb56dff, cells: [[0,0,0],[1,0,0],[2,0,0],[1,0,1]] },
+  { name: 'L',     color: 0xff9d4d, cells: [[0,0,0],[1,0,0],[2,0,0],[0,0,1]] },
+  { name: 'J',     color: 0x5a8eff, cells: [[0,0,0],[1,0,0],[2,0,0],[2,0,1]] },
+  { name: 'S',     color: 0x6cdb6c, cells: [[0,0,0],[1,0,0],[1,0,1],[2,0,1]] },
+  { name: 'Z',     color: 0xff6b6b, cells: [[1,0,0],[2,0,0],[0,0,1],[1,0,1]] },
+  { name: 'Tri',   color: 0xff7ab8, cells: [[0,0,0],[1,0,0],[0,1,0],[0,0,1]] }, // 3D tripod
+  { name: 'Zig3D', color: 0x9be36f, cells: [[0,0,0],[1,0,0],[1,1,0],[1,1,1]] }, // 3D zig
+];
+
+let current = null;      // { cells:[[x,y,z]...], pos:[x,y,z], color }
+let score = 0, layers = 0;
+let gameOver = false;
+let fallAcc = 0;
+let softDrop = false;
+
+// ---------- Cube material cache & groups ----------
+const cubeGeo = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+const matCache = new Map();
+function matFor(color) {
+  if (!matCache.has(color)) {
+    matCache.set(color, new THREE.MeshStandardMaterial({
+      color, roughness: 0.45, metalness: 0.05,
+      emissive: new THREE.Color(color).multiplyScalar(0.08),
+    }));
+  }
+  return matCache.get(color);
+}
+
+const stackGroup = new THREE.Group();
+const pieceGroup = new THREE.Group();
+const ghostGroup = new THREE.Group();
+stackGroup.position.copy(fieldOffset);
+pieceGroup.position.copy(fieldOffset);
+ghostGroup.position.copy(fieldOffset);
+scene.add(stackGroup, pieceGroup, ghostGroup);
+
+function makeCube(color, x, y, z, opts = {}) {
+  const m = new THREE.Mesh(cubeGeo, matFor(color));
+  m.position.set(x + 0.5, y + 0.5, z + 0.5);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  if (opts.ghost) {
+    m.material = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.18, wireframe: false,
+    });
+    m.castShadow = false;
+  }
+  return m;
+}
+
+function rebuildStack() {
+  stackGroup.clear();
+  for (let x = 0; x < W; x++)
+    for (let y = 0; y < H; y++)
+      for (let z = 0; z < D; z++) {
+        const c = grid3[x][y][z];
+        if (c !== null) stackGroup.add(makeCube(c, x, y, z));
+      }
+}
+
+function rebuildPiece() {
+  pieceGroup.clear();
+  ghostGroup.clear();
+  if (!current) return;
+  const [px, py, pz] = current.pos;
+  for (const [dx, dy, dz] of current.cells) {
+    pieceGroup.add(makeCube(current.color, px + dx, py + dy, pz + dz));
+  }
+  // Ghost: where the piece would land
+  const drop = dropDistance(current);
+  for (const [dx, dy, dz] of current.cells) {
+    ghostGroup.add(makeCube(current.color, px + dx, py - drop + dy, pz + dz, { ghost: true }));
+  }
+}
+
+// ---------- Collision & movement ----------
+function cellFree(x, y, z) {
+  if (x < 0 || x >= W || z < 0 || z >= D) return false;
+  if (y < 0) return false;
+  if (y >= H) return true; // above top is free (allow spawn area)
+  return grid3[x][y][z] === null;
+}
+function pieceFits(piece, pos) {
+  const [px, py, pz] = pos;
+  for (const [dx, dy, dz] of piece.cells) {
+    if (!cellFree(px + dx, py + dy, pz + dz)) return false;
+  }
+  return true;
+}
+function dropDistance(piece) {
+  let d = 0;
+  while (pieceFits(piece, [piece.pos[0], piece.pos[1] - d - 1, piece.pos[2]])) d++;
+  return d;
+}
+
+function lockPiece() {
+  const [px, py, pz] = current.pos;
+  for (const [dx, dy, dz] of current.cells) {
+    const x = px + dx, y = py + dy, z = pz + dz;
+    if (y >= H) { gameOver = true; }
+    else grid3[x][y][z] = current.color;
+  }
+  clearFullLayers();
+  rebuildStack();
+  spawnPiece();
+}
+
+function clearFullLayers() {
+  let cleared = 0;
+  for (let y = 0; y < H; y++) {
+    let full = true;
+    for (let x = 0; x < W && full; x++)
+      for (let z = 0; z < D && full; z++)
+        if (grid3[x][y][z] === null) full = false;
+    if (full) {
+      // remove layer y, shift everything above down by 1
+      for (let yy = y; yy < H - 1; yy++)
+        for (let x = 0; x < W; x++)
+          for (let z = 0; z < D; z++)
+            grid3[x][yy][z] = grid3[x][yy + 1][z];
+      for (let x = 0; x < W; x++)
+        for (let z = 0; z < D; z++)
+          grid3[x][H - 1][z] = null;
+      cleared++;
+      y--; // re-check this layer (it was replaced)
+    }
+  }
+  if (cleared > 0) {
+    layers += cleared;
+    score += [0, 100, 250, 500, 1000][cleared] || cleared * 400;
+    updateHud();
+  }
+}
+
+function updateHud() {
+  document.getElementById('score').textContent = `Score: ${score}  |  Layers: ${layers}`;
+}
+
+// ---------- Spawning & rotation ----------
+function spawnPiece() {
+  if (gameOver) return endGame();
+  const def = PIECES[Math.floor(Math.random() * PIECES.length)];
+  const cells = def.cells.map(c => [...c]);
+  // Center horizontally
+  const bb = bbox(cells);
+  const spawnX = Math.floor((W - (bb.max[0] - bb.min[0] + 1)) / 2) - bb.min[0];
+  const spawnZ = Math.floor((D - (bb.max[2] - bb.min[2] + 1)) / 2) - bb.min[2];
+  const spawnY = H - 1 - bb.max[1];
+  const piece = { cells, color: def.color, pos: [spawnX, spawnY, spawnZ] };
+  if (!pieceFits(piece, piece.pos)) {
+    gameOver = true;
+    return endGame();
+  }
+  current = piece;
+  rebuildPiece();
+}
+
+function bbox(cells) {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (const c of cells) for (let i = 0; i < 3; i++) {
+    if (c[i] < min[i]) min[i] = c[i];
+    if (c[i] > max[i]) max[i] = c[i];
+  }
+  return { min, max };
+}
+
+// Rotate cells 90° around given axis: 'x' | 'y' | 'z'. Then re-anchor to keep min at 0.
+function rotateCells(cells, axis) {
+  const r = cells.map(([x, y, z]) => {
+    if (axis === 'y') return [-z, y, x];
+    if (axis === 'x') return [x, -z, y];
+    return [-y, x, z]; // z
+  });
+  const bb = bbox(r);
+  return r.map(([x, y, z]) => [x - bb.min[0], y - bb.min[1], z - bb.min[2]]);
+}
+
+function tryRotate(axis) {
+  if (!current) return;
+  const rotated = rotateCells(current.cells, axis);
+  // Try the rotated piece at current position, then nudge if it doesn't fit (wall kicks)
+  const kicks = [
+    [0,0,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],
+    [0,1,0],[2,0,0],[-2,0,0],[0,0,2],[0,0,-2],
+  ];
+  for (const [kx, ky, kz] of kicks) {
+    const tryPos = [current.pos[0] + kx, current.pos[1] + ky, current.pos[2] + kz];
+    const test = { cells: rotated, pos: tryPos, color: current.color };
+    if (pieceFits(test, tryPos)) {
+      current.cells = rotated;
+      current.pos = tryPos;
+      rebuildPiece();
+      return;
+    }
+  }
+}
+
+// ---------- Camera-relative movement ----------
+function cameraAxes() {
+  // forward = direction from camera into the scene, projected on XZ, snapped to cardinal
+  const f = new THREE.Vector3();
+  camera.getWorldDirection(f);
+  f.y = 0;
+  if (f.lengthSq() < 1e-6) return { fwd: [0, 0, 1], right: [1, 0, 0] };
+  f.normalize();
+  let fx, fz;
+  if (Math.abs(f.x) > Math.abs(f.z)) { fx = Math.sign(f.x); fz = 0; }
+  else { fx = 0; fz = Math.sign(f.z); }
+  // right = forward rotated -90° around Y: (x,z) -> (z,-x)... but we want screen-right.
+  // For a camera looking in dir (fx,fz), screen-right (in world) is (-fz, fx).
+  const rx = -fz, rz = fx;
+  return { fwd: [fx, 0, fz], right: [rx, 0, rz] };
+}
+
+function tryMove(dx, dz) {
+  if (!current) return;
+  const newPos = [current.pos[0] + dx, current.pos[1], current.pos[2] + dz];
+  if (pieceFits(current, newPos)) {
+    current.pos = newPos;
+    rebuildPiece();
+  }
+}
+
+function tryFall() {
+  if (!current) return false;
+  const newPos = [current.pos[0], current.pos[1] - 1, current.pos[2]];
+  if (pieceFits(current, newPos)) {
+    current.pos = newPos;
+    rebuildPiece();
+    return true;
+  }
+  lockPiece();
+  return false;
+}
+
+function hardDrop() {
+  if (!current) return;
+  const d = dropDistance(current);
+  current.pos[1] -= d;
+  score += d * 2;
+  updateHud();
+  lockPiece();
+}
+
+// ---------- Input ----------
+addEventListener('keydown', (e) => {
+  if (gameOver) return;
+  const { fwd, right } = cameraAxes();
+  switch (e.code) {
+    case 'ArrowUp':    tryMove(fwd[0],  fwd[2]);  e.preventDefault(); break;
+    case 'ArrowDown':  tryMove(-fwd[0], -fwd[2]); e.preventDefault(); break;
+    case 'ArrowRight': tryMove(right[0], right[2]); e.preventDefault(); break;
+    case 'ArrowLeft':  tryMove(-right[0], -right[2]); e.preventDefault(); break;
+    case 'KeyQ': tryRotate('y'); break;
+    case 'KeyE': tryRotate('y'); for (let i=0;i<2;i++) tryRotate('y'); break; // Q=ccw-ish, E=cw-ish (3x ccw = cw)
+    case 'KeyR': tryRotate('x'); break;
+    case 'KeyF': tryRotate('x'); for (let i=0;i<2;i++) tryRotate('x'); break;
+    case 'KeyZ': tryRotate('z'); break;
+    case 'KeyX': tryRotate('z'); for (let i=0;i<2;i++) tryRotate('z'); break;
+    case 'ShiftLeft':
+    case 'ShiftRight': softDrop = true; break;
+    case 'Space': hardDrop(); e.preventDefault(); break;
+  }
+});
+addEventListener('keyup', (e) => {
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') softDrop = false;
+});
+
+// ---------- Resize ----------
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Game over ----------
+function endGame() {
+  current = null;
+  rebuildPiece();
+  document.getElementById('gameover').style.display = 'flex';
+}
+
+// ---------- Loop ----------
+let last = performance.now();
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = now - last; last = now;
+  controls.update();
+
+  if (!gameOver && current) {
+    fallAcc += dt;
+    const interval = softDrop ? SOFT_FALL_MS : FALL_MS;
+    while (fallAcc >= interval) {
+      fallAcc -= interval;
+      if (!tryFall()) break;
+    }
+  }
+  renderer.render(scene, camera);
+}
+
+// ---------- Start ----------
+spawnPiece();
+updateHud();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
