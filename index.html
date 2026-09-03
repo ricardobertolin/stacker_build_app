@@ -34,7 +34,12 @@
   }
 
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--font); }
-  canvas { display: block; }
+  /* A finger dragging the canvas is orbiting the camera, never scrolling the
+     page, and a second tap is never a zoom — the browser has to be told both
+     or it eats the gesture before OrbitControls sees it. */
+  canvas { display: block; touch-action: none; }
+  body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+  button, .role, .tool, .thm { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
   .panel { background: var(--panel); backdrop-filter: blur(var(--blur)); border: var(--panel-brd) solid var(--line); border-radius: var(--r); }
 
@@ -65,6 +70,7 @@
   body[data-phase="siege"] #timerFill { background: var(--danger); }
   body[data-phase="siege"] #phaseName { color: var(--danger); }
   body[data-phase="settle"] #timerFill { background: var(--mute); }
+  body[data-untimed="1"] #timerTrack { display: none; }
   /* A surge round announces itself in the phase strip and never stops. */
   body[data-surge="1"] #phaseBox { border-color: var(--surge); box-shadow: 0 0 22px -6px var(--surge); }
 
@@ -156,12 +162,65 @@
   #roleWatch h2 { color: var(--ward); }
   #roleWatch:hover { border-color: var(--ward); }
   .roles + .roles { margin-top: 14px; }
-  #start .modes { display: flex; flex-direction: column; align-items: center; }
+  #start .modes { flex-direction: column; align-items: center; }
   body[data-mode="pvp"] #switchBtn, body[data-mode="auto"] #switchBtn { display: none; }
 
+  /* The start screen is one element wearing four faces. Every panel is hidden
+     by default and data-view picks the one that is showing, so there is a
+     single place that decides where you are instead of a class per panel. */
+  #startRoot, #start .modes, #lobby, #optsPanel { display: none; }
+  #start[data-view="root"]  #startRoot { display: flex; }
+  #start[data-view="modes"] .modes    { display: flex; }
+  #start[data-view="lobby"] #lobby    { display: flex; }
+  #start[data-view="opts"]  #optsPanel { display: flex; }
+  #themeRow { display: none; }
+  #start[data-view="root"] #themeRow { display: flex; }
+
+  /* --- root menu --- */
+  #startRoot { flex-direction: column; align-items: center; gap: 10px; }
+  #startRoot .play { pointer-events: auto; padding: 15px 66px; font: inherit; font-size: 20px; font-weight: 700; letter-spacing: 3px;
+                     text-transform: uppercase; border: 0; border-radius: var(--r); cursor: pointer;
+                     background: var(--accent); color: var(--accent-ink); box-shadow: 0 3px 0 var(--accent-sh); transition: .12s; }
+  #startRoot .play:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  #startRoot .play:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--accent-sh); }
+  #startRoot .mi { pointer-events: auto; padding: 9px 26px; font: inherit; font-size: 13px; cursor: pointer;
+                   border-radius: calc(var(--r) - 2px); background: transparent; border: 1px solid var(--line); color: var(--dim); transition: .12s; }
+  #startRoot .mi:hover { color: var(--ink); border-color: var(--accent); }
+
+  /* --- training options --- */
+  #optsPanel { flex-direction: column; align-items: stretch; width: 460px; max-width: calc(100vw - 40px);
+               padding: 20px 22px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); text-align: left; }
+  #optsPanel h2 { font-family: var(--disp); font-weight: var(--disp-w); margin: 0 0 4px; font-size: 22px; letter-spacing: 1px; color: var(--accent); }
+  #optsPanel .lsub { font-size: 12.5px; color: var(--mute); margin-bottom: 14px; line-height: 1.5; }
+  .opt { display: flex; gap: 11px; align-items: flex-start; padding: 9px 10px; border-radius: calc(var(--r) - 3px); cursor: pointer;
+         border: 1px solid transparent; transition: .12s; }
+  .opt:hover { background: var(--ward-bg); }
+  .opt.on { border-color: var(--accent); background: var(--ward-bg); }
+  /* A drawn box rather than a native checkbox: the native one ignores the skin
+     and this screen is the one place every theme is on show. */
+  .opt .bx { flex: none; width: 17px; height: 17px; margin-top: 1px; border-radius: 4px; border: 1px solid var(--line);
+             background: var(--scrim-soft); position: relative; }
+  .opt.on .bx { background: var(--accent); border-color: var(--accent); }
+  .opt.on .bx::after { content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                       font-size: 12px; font-weight: 700; color: var(--accent-ink); }
+  .opt .ol { font-size: 13px; color: var(--ink); font-weight: 600; }
+  .opt .od { font-size: 11.5px; color: var(--mute); line-height: 1.45; margin-top: 2px; }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+
   /* --- theme picker --- */
-  #themeRow { display: flex; gap: 8px; align-items: center; margin-top: 22px; }
-  #start.lobbying #themeRow { display: none; }
+  /* #over defines its own .btns row; these two panels need the same thing. */
+  #optsPanel .btns, .modes .btns { display: flex; gap: 10px; justify-content: center; }
+
+  /* The scene keeps rendering behind the menu because it is the backdrop. The
+     HUD does not: a score of nothing and an empty attack queue laid over the
+     start screen is furniture for a match that has not been dealt yet. */
+  body[data-started="0"] #scoreBox, body[data-started="0"] #phaseBox,
+  body[data-started="0"] #queueBox, body[data-started="0"] #bar,
+  body[data-started="0"] #help,     body[data-started="0"] #train,
+  body[data-started="0"] #nextUp,   body[data-started="0"] #sabBar,
+  body[data-started="0"] #aimHint { display: none; }
+
+  #themeRow { gap: 8px; align-items: center; margin-top: 22px; }
   #themeRow .lb { font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--mute); margin-right: 2px; }
   .thm { pointer-events: auto; padding: 6px 13px; border-radius: calc(var(--r) - 3px); cursor: pointer; font: inherit; font-size: 11.5px;
          background: var(--panel); border: 1px solid var(--line); color: var(--dim); transition: .12s; }
@@ -169,10 +228,8 @@
   .thm.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
   /* --- lobby: hosting a link, or joining one --- */
-  #lobby { display: none; flex-direction: column; align-items: center; width: 470px;
+  #lobby { flex-direction: column; align-items: center; width: 470px; max-width: calc(100vw - 40px);
            padding: 22px 24px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
-  #start.lobbying .modes { display: none; }
-  #start.lobbying #lobby { display: flex; }
   #lobby h2 { font-family: var(--disp); font-weight: var(--disp-w); margin: 0 0 4px; font-size: 22px; letter-spacing: 1px; color: var(--info); }
   #lobby .lsub { font-size: 12.5px; color: var(--mute); margin-bottom: 16px; line-height: 1.5; }
   #linkRow { display: flex; gap: 8px; width: 100%; margin-bottom: 14px; }
@@ -279,6 +336,183 @@
            border: 1px solid var(--line); }
   .pchip .sw { width: 9px; height: 9px; border-radius: 2px; }
   .pchip.now { border-color: var(--accent); color: var(--ink); }
+
+  /* =====================================================================
+     Touch controls.
+     Everything the builder does — nudge, rotate, raise — is a key on the
+     desktop build, so on a touchscreen there is literally no way to move a
+     piece without these. They appear only where the keyboard cannot be
+     reached, and under exactly the conditions that show the Drop button:
+     your turn, your side, not a spectator, not the remote half of a link.
+     ===================================================================== */
+  .pad { position: fixed; bottom: 14px; display: none; grid-gap: 6px; z-index: 13;
+         padding: 7px; border-radius: var(--r); background: var(--panel); backdrop-filter: blur(var(--blur)); border: 1px solid var(--line); }
+  #padMove { left: 12px; grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 38px); }
+  #padTurn { right: 12px; grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(2, 38px); }
+  /* data-role is set at boot so the menu can be skinned by side, which means
+     it is 'builder' before there is a match to build in. The pads key off
+     data-started as well, or they sit under the start screen offering to move
+     a piece that does not exist. */
+  body[data-touch="1"][data-started="1"][data-role="builder"][data-phase="build"] .pad { display: grid; }
+  body[data-touch="1"][data-mode="auto"] .pad,
+  body[data-touch="1"][data-remote="1"] .pad { display: none; }
+  .pad button { pointer-events: auto; border: 1px solid var(--line); border-radius: calc(var(--r) - 4px); cursor: pointer;
+                background: var(--sec); color: var(--ink); font: inherit; font-size: 16px; line-height: 1;
+                display: flex; align-items: center; justify-content: center; touch-action: manipulation; }
+  .pad button:active { background: var(--accent); color: var(--accent-ink); }
+  .pad button .lb { font-size: 8.5px; letter-spacing: .6px; opacity: .7; margin-top: 2px; }
+  .pad button.stk { flex-direction: column; }
+  .pad .gap { visibility: hidden; }
+
+  /* Aiming by tapping the tower needs saying once, or the pad reads as the
+     only way to move and the piece never leaves the middle of the table. */
+  #touchTip { position: fixed; bottom: 122px; left: 50%; transform: translateX(-50%); display: none; z-index: 12;
+              padding: 5px 13px; border-radius: 20px; font-size: 11px; color: var(--dim); pointer-events: none;
+              background: var(--panel); border: 1px solid var(--line); white-space: nowrap; }
+  body[data-touch="1"][data-started="1"][data-role="builder"][data-phase="build"] #touchTip { display: block; }
+  body[data-touch="1"][data-mode="auto"] #touchTip,
+  body[data-touch="1"][data-remote="1"] #touchTip { display: none; }
+  /* The keyboard legend is noise on a device with no keyboard. */
+  body[data-touch="1"] #help { display: none; }
+
+  /* =====================================================================
+     Small screens.
+     The desktop layout parks fixed-width panels in all four corners, which
+     on a phone means four panels stacked on top of each other. Rather than
+     reflow into a column and lose the view of the tower — the tower is the
+     game — the panels shrink, the two that are reference material rather
+     than live state (help, training) fold away, and the saboteur's palette
+     becomes a strip you swipe through.
+     ===================================================================== */
+  @media (max-width: 820px), (max-height: 560px) {
+    #scoreBox { top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left));
+                padding: 7px 9px; font-size: 11px; min-width: 0; max-width: 42vw; line-height: 1.4; }
+    #scoreBox .big { font-size: 21px; }
+    #resBox { font-size: 10px; }
+    #phaseBox { top: calc(8px + env(safe-area-inset-top)); width: auto; max-width: 46vw; padding: 6px 10px 7px; }
+    #phaseName { font-size: 13px; }
+    #phaseSub { display: none; }
+    #queueBox { top: auto; bottom: calc(64px + env(safe-area-inset-bottom)); right: calc(8px + env(safe-area-inset-right));
+                width: 150px; max-height: 34vh; overflow-y: auto; padding: 7px 8px; font-size: 10.5px; }
+    #queueBox h3 { font-size: 9px; }
+    #help, #train { display: none; }
+    #toast .t1 { font-size: 27px; }
+    #toast .t2 { font-size: 12px; padding: 0 18px; }
+    #netPill { margin-top: 62px; font-size: 10px; }
+
+    #bar { bottom: calc(8px + env(safe-area-inset-bottom)); gap: 5px; flex-wrap: wrap; justify-content: center;
+           max-width: calc(100vw - 16px); }
+    button.b { padding: 8px 11px; font-size: 12px; }
+    button.b small { display: none; }
+
+    /* The palette does not fit and must not wrap: wrapping pushes it over the
+       tower. It scrolls sideways instead, with the commit button pinned after
+       the last tool so ending the turn is never off-screen by accident. */
+    #sabBar { left: 0; right: 0; transform: none; box-sizing: border-box;
+              padding: 0 8px calc(4px + env(safe-area-inset-bottom));
+              bottom: 56px; overflow-x: auto; overflow-y: hidden; justify-content: flex-start;
+              scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    #sabBar::-webkit-scrollbar { display: none; }
+    .tool { width: 74px; flex: none; padding: 5px 4px 4px; }
+    .tool .ti { font-size: 14px; }
+    .tool .tn { font-size: 9.5px; }
+    .tool .tc, .tool .tk { font-size: 8.5px; }
+    .tool .tk { display: none; }
+    .commit { min-width: 104px; flex: none; padding: 6px 10px; }
+    .commit .cl { font-size: 11px; }
+    .commit .cs { display: none; }
+    body[data-role="saboteur"] #bar { right: auto; left: 50%; transform: translateX(-50%); }
+    #aimHint { bottom: 148px; font-size: 11px; max-width: calc(100vw - 24px); }
+    #nextUp { bottom: 112px; font-size: 10px; }
+
+    #start { overflow-y: auto; padding: 18px 0; justify-content: flex-start; }
+    #start h1 { font-size: 38px; margin-top: auto; }
+    #start .tag { font-size: 10px; letter-spacing: 1.6px; margin: 6px 14px 16px; }
+    #themeRow { margin-top: 16px; margin-bottom: auto; flex-wrap: wrap; justify-content: center; padding: 0 12px; }
+    .roles { flex-direction: column; gap: 10px; padding: 0 14px; }
+    .roles + .roles { margin-top: 10px; }
+    .role { width: 100%; max-width: 420px; padding: 13px 15px; }
+    .role h2 { font-size: 19px; }
+    .role p { font-size: 11.5px; margin-bottom: 7px; }
+    .role ul { font-size: 11px; }
+    #startRoot { margin: auto 0; }
+    #startRoot .play { padding: 14px 52px; font-size: 18px; }
+
+    #over { overflow-y: auto; padding: 20px 14px; justify-content: flex-start; }
+    #over h1 { font-size: 30px; margin-top: auto; }
+    #over .sub { font-size: 11.5px; padding: 0 8px; }
+    #over .final { font-size: 46px; }
+    #over table { font-size: 12px; border-spacing: 10px 3px; }
+    #over .btns { margin-bottom: auto; }
+    #pause .pt { font-size: 34px; letter-spacing: 4px; }
+
+    #optsPanel { padding: 16px 15px; }
+    #optsPanel h2 { font-size: 19px; }
+    .opt { padding: 8px 7px; }
+  }
+
+  /* =====================================================================
+     Portrait.
+     Landscape has room to keep the desktop arrangement — four corners, one
+     panel in each. Portrait does not: three panels cannot share the top row
+     of a 390px screen, and the pads, the bar, the deal and the palette all
+     want the same floor. So the top row keeps two panels and moves the third
+     under one of them, and the bottom becomes an explicit stack measured up
+     from the safe area rather than four things each anchored to the floor.
+     ===================================================================== */
+  @media (max-width: 820px) and (orientation: portrait) {
+    /* The one place these heights are written down. The bar wraps to two rows
+       for the builder, who has four more buttons than the saboteur. */
+    :root { --sa: env(safe-area-inset-bottom); --padH: 134px; --barH: 42px; --barH-b: 84px; }
+
+    /* Top: score on the left, phase on the right, queue directly under the
+       phase. Centring the phase is what put it on top of the score. */
+    #scoreBox { max-width: 40vw; }
+    #phaseBox { left: auto; right: calc(8px + env(safe-area-inset-right)); transform: none; max-width: 44vw; }
+    #queueBox { top: 66px; bottom: auto; right: calc(8px + env(safe-area-inset-right));
+                max-height: 30vh; }
+    #netPill { margin-top: 0; top: auto; bottom: calc(8px + var(--sa)); left: 12px; transform: none; }
+
+    /* Bottom, from the floor up. A fixed bar sizes itself to its content,
+       which on a narrow screen collapses into a tall narrow column of
+       buttons; pinning both edges makes it wrap into predictable rows. */
+    #bar { left: 8px; right: 8px; transform: none; max-width: none; justify-content: center;
+           bottom: calc(8px + var(--sa)); }
+    body[data-role="saboteur"] #bar { left: 8px; right: 8px; transform: none; }
+    #sabBar { bottom: calc(16px + var(--barH) + var(--sa)); }
+
+    /* The builder's floor belongs to the pads, so its bar sits on top of them
+       and everything else stacks above that. */
+    body[data-role="builder"] .pad { bottom: calc(8px + var(--sa)); }
+    body[data-role="builder"] #bar { bottom: calc(16px + var(--padH) + var(--sa)); }
+    body[data-role="builder"] #nextUp { bottom: calc(24px + var(--padH) + var(--barH-b) + var(--sa)); }
+    body[data-role="builder"] #touchTip { bottom: calc(80px + var(--padH) + var(--barH-b) + var(--sa)); }
+    #aimHint { bottom: calc(22px + var(--barH) + var(--sa)); }
+    body[data-role="saboteur"] #aimHint { bottom: calc(26px + var(--barH) + 57px + var(--sa)); }
+  }
+
+  /* Below this the palette and the pads would collide, so the pads move up
+     and everything gives back a few more pixels. */
+  @media (max-width: 420px) {
+    :root { --padH: 128px; }
+    #padMove { grid-template-columns: repeat(3, 38px); grid-template-rows: repeat(3, 34px); }
+    #padTurn { grid-template-columns: repeat(3, 38px); grid-template-rows: repeat(2, 34px); }
+    #scoreBox { font-size: 10px; max-width: 38vw; }
+    #phaseBox { max-width: 42vw; }
+    #queueBox { width: 132px; }
+  }
+
+  /* Landscape on a phone is all width and no height: the corners are fine,
+     the vertical stacks are not. */
+  @media (max-height: 460px) and (orientation: landscape) {
+    #queueBox { max-height: 40vh; bottom: auto; top: calc(52px + env(safe-area-inset-top)); }
+    .pad { bottom: 8px; }
+    #padMove { grid-template-rows: repeat(3, 30px); }
+    #padTurn { grid-template-rows: repeat(2, 30px); }
+    #touchTip { display: none !important; }
+    #toast { top: 26%; }
+    #toast .t1 { font-size: 22px; }
+  }
 </style>
 </head>
 <body data-phase="build">
@@ -324,6 +558,7 @@
   <button class="b sec" id="pauseBtn" title="Pause (P)">⏸</button>
   <button class="b sec" id="muteBtn" title="Mute (M)">🔊</button>
   <button class="b sec" id="restartBtn">Restart</button>
+  <button class="b sec" id="menuBtn" title="Main menu">Menu</button>
 </div>
 
 <div id="pause"><div class="pt">PAUSED</div><div class="ps">P or the ⏸ button to resume</div></div>
@@ -331,6 +566,27 @@
 <div id="sabBar"></div>
 <div id="aimHint"></div>
 <div id="nextUp" class="panel"></div>
+
+<div id="touchTip">Tap the tower to aim &nbsp;·&nbsp; drag to orbit</div>
+<div id="padMove" class="pad">
+  <span class="gap"></span>
+  <button data-act="fwd" aria-label="Move away">▲</button>
+  <span class="gap"></span>
+  <button data-act="left" aria-label="Move left">◀</button>
+  <span class="gap"></span>
+  <button data-act="right" aria-label="Move right">▶</button>
+  <span class="gap"></span>
+  <button data-act="back" aria-label="Move toward">▼</button>
+  <span class="gap"></span>
+</div>
+<div id="padTurn" class="pad">
+  <button class="stk" data-act="yawL" aria-label="Turn left">↺<span class="lb">TURN</span></button>
+  <button class="stk" data-act="yawR" aria-label="Turn right">↻<span class="lb">TURN</span></button>
+  <button class="stk" data-act="up" aria-label="Raise">▲<span class="lb">UP</span></button>
+  <button class="stk" data-act="pitchF" aria-label="Tip forward">⤾<span class="lb">TIP</span></button>
+  <button class="stk" data-act="pitchB" aria-label="Tip back">⤿<span class="lb">TIP</span></button>
+  <button class="stk" data-act="down" aria-label="Lower">▼<span class="lb">DOWN</span></button>
+</div>
 
 <div id="netPill">connecting…</div>
 
@@ -379,9 +635,15 @@
   </div>
 </div>
 
-<div id="start">
+<div id="start" data-view="root">
   <h1>Tower Siege</h1>
-  <div class="tag" id="startTag">Foundry &nbsp;·&nbsp; Builder vs Saboteur &nbsp;·&nbsp; pick a mode</div>
+  <div class="tag" id="startTag">Foundry &nbsp;·&nbsp; Builder vs Saboteur</div>
+
+  <div id="startRoot">
+    <button class="play" id="playBtn">Play</button>
+    <button class="mi" id="optsBtn">Training options</button>
+  </div>
+
   <div class="modes">
   <div class="roles">
     <button class="role" id="roleBuilder">
@@ -428,6 +690,15 @@
       </ul>
     </button>
   </div>
+  <div class="btns" style="margin-top:16px"><button class="b sec" id="modesBack">Back</button></div>
+  </div>
+
+  <div id="optsPanel">
+    <h2>Training options</h2>
+    <div class="lsub">Practice settings. They strip the pauses out of a match so a
+      retry costs a second rather than ten, and they are remembered on this device.</div>
+    <div id="optsList"></div>
+    <div class="btns" style="margin-top:16px; justify-content:center"><button class="b sec" id="optsBack">Back</button></div>
   </div>
 
   <div id="lobby">
@@ -716,7 +987,7 @@ const Theme = (() => {
     for (const k in T.css) root.setProperty('--' + k, T.css[k]);
     document.body.dataset.theme = name;
     const tagEl = document.getElementById('startTag');
-    if (tagEl) tagEl.textContent = `${T.tag}  ·  Builder vs Saboteur  ·  pick a mode`;
+    if (tagEl) tagEl.textContent = `${T.tag}  ·  Builder vs Saboteur`;
     for (const b of document.querySelectorAll('.thm')) b.classList.toggle('on', b.dataset.theme === name);
 
     // --- scene ---
@@ -1873,6 +2144,60 @@ const G = {
 };
 const isBuilder = () => G.role === ROLE.BUILDER;
 
+// =====================================================================
+//  Training options
+//  These are practice settings, not rules. A match is paced to feel like an
+//  occasion — banners announce the round, the scoreline holds for a beat,
+//  the end waits for you to press something — and every one of those beats
+//  is friction on the twentieth attempt at the same opening. Each option
+//  deletes one of them. The rules of the game are untouched, apart from the
+//  clock, which is listed as what it is.
+//
+//  `solo` marks the two that assume one person is driving: a turn that never
+//  expires lets a link player stall the other forever, and a match that
+//  restarts itself would drag someone else into a game they did not ask for.
+//  Those are read as off in link play, whatever the box says.
+// =====================================================================
+const TRAIN_OPTS = [
+  { k: 'quiet', label: 'Skip screen texts',
+    desc: 'No round banners, no commentary between rounds. Warnings about a move you cannot make still appear.' },
+  { k: 'noRecap', label: 'Skip the round recap',
+    desc: 'Rounds roll straight into the next one instead of holding on the scoreline.' },
+  { k: 'again', label: 'Restart automatically', solo: true,
+    desc: 'When a match ends the next one starts on its own, same side. Nothing to press.' },
+  { k: 'untimed', label: 'Untimed turns', solo: true,
+    desc: 'Your build and plan phases never run out, so a placement can take as long as it takes.' },
+  { k: 'skipMenu', label: 'Straight into the game',
+    desc: 'Skip the menu on load and drop back into whatever you played last.' },
+];
+
+const TR = (() => {
+  const KEY = 'siege.train.v1';
+  // Private browsing and file:// both make localStorage throw rather than
+  // return null, so every touch of it is guarded and the options simply do
+  // not persist where they cannot.
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
+  const write = v => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} };
+  let on = read();
+  const spec = k => TRAIN_OPTS.find(o => o.k === k);
+
+  return {
+    // What the checkbox says, regardless of whether it currently applies.
+    raw: k => !!on[k],
+    // What the game should actually do.
+    get(k) {
+      if (!on[k]) return false;
+      if (spec(k)?.solo && G.mode === MODE.PVP) return false;
+      return true;
+    },
+    set(k, v) { on[k] = !!v; write(on); },
+    toggle(k) { this.set(k, !on[k]); return !!on[k]; },
+    // Remembered so 'skipMenu' has somewhere to go back to.
+    lastGame: () => { try { return JSON.parse(localStorage.getItem(KEY + '.last')); } catch { return null; } },
+    rememberGame(role, mode) { try { localStorage.setItem(KEY + '.last', JSON.stringify({ role, mode })); } catch {} },
+  };
+})();
+
 // Link-play connection state. Populated by the NET block further down; declared
 // here because the ownership helpers below are written against it.
 const NET = {
@@ -2075,7 +2400,7 @@ function cyclePreview() {
   if (G.phase !== PHASE.BUILD || !buildLocal() || !preview) return;
   if (G.swaps <= 0) {
     Snd.deny();
-    toast('NO SWAPS LEFT', 'Make this piece work.', 1.2);
+    toast('NO SWAPS LEFT', 'Make this piece work.', 1.2, true);
     return;
   }
   if (isGuest()) { netSend({ t: 'i', k: 'swap' }); Snd.click(560); return; }
@@ -2083,7 +2408,7 @@ function cyclePreview() {
   Snd.click(560);
   spawnPreview();
   updateHUD();
-  if (G.swaps === 0) toast('LAST SWAP SPENT', 'No more piece changes this round.', 1.1);
+  if (G.swaps === 0) toast('LAST SWAP SPENT', 'No more piece changes this round.', 1.1, true);
 }
 
 // Shared by the human builder and the AI builder.
@@ -3290,7 +3615,7 @@ function selectTool(k) {
     // click would place something the player did not ask for.
     tool = null;
     Snd.deny();
-    toast('NOT ENOUGH ENERGY', `${G.surge ? SUPER[k].name : k} costs ${toolCost(k)}, you have ${G.energy}`, 1.2);
+    toast('NOT ENOUGH ENERGY', `${G.surge ? SUPER[k].name : k} costs ${toolCost(k)}, you have ${G.energy}`, 1.2, true);
   } else {
     tool = tool === k ? null : k;
     Snd.click(tool ? 820 : 620);
@@ -3378,31 +3703,31 @@ function placeAttack() {
   if (!planningNow() || !tool) return;
   const spec = TOOLS[tool];
   const cost = toolCost(tool);
-  if (cost > G.energy) { toast('NOT ENOUGH ENERGY', 'End your turn with what you placed.', 1.1); return; }
+  if (cost > G.energy) { toast('NOT ENOUGH ENERGY', 'End your turn with what you placed.', 1.1, true); return; }
 
   let params = null;
   if (spec.aim === 'blockOrGround') {
     if (hoverBlock) {
-      if (hoverBlock.greased) { toast('ALREADY SLICK', 'Pick another block.', 1.1); return; }
-      if (alreadyQueuedOn(hoverBlock, tool)) { toast('ALREADY TARGETED', 'That block is already on the list.', 1.2); return; }
+      if (hoverBlock.greased) { toast('ALREADY SLICK', 'Pick another block.', 1.1, true); return; }
+      if (alreadyQueuedOn(hoverBlock, tool)) { toast('ALREADY TARGETED', 'That block is already on the list.', 1.2, true); return; }
       params = { target: hoverBlock };
     } else if (hoverPoint) {
-      if (!groundGreaseOK(hoverPoint)) { toast('TOO FAR OUT', 'Pour it inside the build zone.', 1.2); return; }
+      if (!groundGreaseOK(hoverPoint)) { toast('TOO FAR OUT', 'Pour it inside the build zone.', 1.2, true); return; }
       if (slickNear(hoverPoint.x, hoverPoint.z) || greaseQueuedNear(hoverPoint)) {
-        toast('ALREADY SLICK', 'That patch of table is spoken for.', 1.2); return;
+        toast('ALREADY SLICK', 'That patch of table is spoken for.', 1.2, true); return;
       }
       params = { pos: hoverPoint.clone(), ground: true };
     } else {
-      toast('AIM IT', 'Click a block, or the bare table.', 1.0); return;
+      toast('AIM IT', 'Click a block, or the bare table.', 1.0, true); return;
     }
   } else if (spec.aim === 'point') {
-    if (!hoverPoint) { toast('AIM IT', 'Click on the tower or the table.', 1.0); return; }
+    if (!hoverPoint) { toast('AIM IT', 'Click on the tower or the table.', 1.0, true); return; }
     params = { pos: hoverPoint.clone() };
   } else if (spec.aim === 'block') {
-    if (!hoverBlock) { toast('PICK A BLOCK', 'That tool needs a target block.', 1.0); return; }
-    if (tool === 'snatch' && hoverBlock.keystone) { toast('KEYSTONE', 'That one is not coming out.', 1.2); return; }
-    if (tool === 'snatch' && hoverBlock.anchored && !G.surge) { toast('ANCHORED', 'Bolted down. Blast it loose first.', 1.2); return; }
-    if (alreadyQueuedOn(hoverBlock, tool)) { toast('ALREADY TARGETED', 'That block is already on the list.', 1.2); return; }
+    if (!hoverBlock) { toast('PICK A BLOCK', 'That tool needs a target block.', 1.0, true); return; }
+    if (tool === 'snatch' && hoverBlock.keystone) { toast('KEYSTONE', 'That one is not coming out.', 1.2, true); return; }
+    if (tool === 'snatch' && hoverBlock.anchored && !G.surge) { toast('ANCHORED', 'Bolted down. Blast it loose first.', 1.2, true); return; }
+    if (alreadyQueuedOn(hoverBlock, tool)) { toast('ALREADY TARGETED', 'That block is already on the list.', 1.2, true); return; }
     params = { target: hoverBlock };
   }
 
@@ -3780,7 +4105,7 @@ function startPlanPhase() {
     return;
   }
 
-  setPhase(PHASE.PLAN, CFG.planTime);
+  setPhase(PHASE.PLAN, turnClock(CFG.planTime));
   renderPalette(); renderQueue(); updateHUD();
   const mine = sabLocal();
   toast(mine ? (G.openingRound ? 'YOUR MOVE' : `ROUND ${G.round}`) : `ROUND ${G.round}`,
@@ -3813,7 +4138,7 @@ function startBuildTurn() {
   }
   // A human builder — yours or the one at the other end of the link — gets the
   // full clock, and the host owns the deal either way.
-  setPhase(PHASE.BUILD, G.round === 1 ? CFG.buildTimeFirst : CFG.buildTime);
+  setPhase(PHASE.BUILD, turnClock(G.round === 1 ? CFG.buildTimeFirst : CFG.buildTime));
   outOfPiecesT = 1.0;
   if (isHost()) spawnPreview();
   if (buildLocal()) {
@@ -3986,7 +4311,9 @@ function finishRound() {
   if (G.integrity <= 0 || towerGone) { gameOver(dmg >= 2 || towerGone ? 'collapsed' : 'worn'); return; }
   if (G.patience <= 0) { gameOver('outlasted'); return; }
 
-  setPhase(PHASE.SUMMARY, CFG.summaryTime);
+  // Long enough to read the scoreline, or barely long enough to let the
+  // settling frame land before the next round is dealt.
+  setPhase(PHASE.SUMMARY, TR.get('noRecap') ? 0.25 : CFG.summaryTime);
   // A cracked strut sounds the same to both sides; a clean round is good news
   // for the builder and bad news for the saboteur.
   if (dmg) Snd.dull();
@@ -4049,10 +4376,21 @@ function gameOver(reason) {
   if (G.mode === MODE.AUTO) Train.finishMatch(builderWon);
 }
 
+// A clock long enough that nothing reaches the end of it in a sitting, rather
+// than Infinity — the timer bar divides by it and Infinity/Infinity is NaN.
+const UNTIMED = 1e6;
+// Only a human turn taken on this machine is exempt. An AI turn is paced by
+// its clock rather than limited by it, and a mirrored turn belongs to the
+// host's clock, so neither goes through here.
+function turnClock(sec) { return TR.get('untimed') ? UNTIMED : sec; }
+
 function setPhase(p, dur) {
   G.phase = p;
   G.t = dur; G.tMax = dur;
   document.body.dataset.phase = p;
+  // A bar that will never visibly move is worse than no bar: it reads as
+  // frozen rather than as switched off.
+  document.body.dataset.untimed = dur >= UNTIMED ? '1' : '0';
   // "Whose turn is it, and is it mine" drives every line of this copy, so the
   // same phase reads differently to the builder, the saboteur and a spectator.
   const mineB = buildLocal(), mineS = sabLocal();
@@ -4090,7 +4428,7 @@ function setPhase(p, dur) {
 function readyUp() {
   if (planningNow()) {
     if (isGuest()) { netSend({ t: 'i', k: 'ready' }); return; }
-    if (!G.queue.length) { toast('NOTHING PLACED', 'Put at least one attack down.', 1.2); return; }
+    if (!G.queue.length) { toast('NOTHING PLACED', 'Put at least one attack down.', 1.2, true); return; }
     tool = null;
     updateAimHint();
     renderPalette();
@@ -4181,7 +4519,7 @@ function renderQueue() {
         return;
       }
       if (G.phase !== PHASE.BUILD || a.warded) return;
-      if (G.wards <= 0) { toast('NO WARDS', 'Survive a siege intact to earn one.', 1.2); return; }
+      if (G.wards <= 0) { toast('NO WARDS', 'Survive a siege intact to earn one.', 1.2, true); return; }
       if (isGuest()) { netSend({ t: 'i', k: 'ward', id: a.id }); return; }
       applyWard(a);
     };
@@ -4240,7 +4578,12 @@ function updateHUD() {
 }
 
 let toastT = 0;
-function toast(a, b, dur = 1.5) {
+// `keep` marks the toasts that are not commentary: they are the only reason
+// given for an action the game just refused. Silencing those with the rest
+// would leave a button that does nothing and says nothing about why, so they
+// survive 'Skip screen texts' and the narration does not.
+function toast(a, b, dur = 1.5, keep = false) {
+  if (TR.get('quiet') && !keep) return;
   document.getElementById('toastA').textContent = a;
   document.getElementById('toastB').textContent = b || '';
   document.getElementById('toast').classList.add('show');
@@ -4323,20 +4666,104 @@ function toggleKeystone() {
 // Aiming shares the canvas with the orbit camera, so only a press that barely
 // moved and was quick counts as a placement click.
 let downAt = null;
-renderer.domElement.addEventListener('pointermove', e => {
+function readPointer(e) {
   pointerNDC.x = (e.clientX / innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / innerHeight) * 2 + 1;
-});
+}
+renderer.domElement.addEventListener('pointermove', readPointer);
+// A mouse is somewhere on the canvas at all times, so the hover ray is always
+// current by the time it is clicked. A finger is not: it exists from the
+// moment it lands, and a quick enough tap can produce no move event at all.
+// So the position is taken from the press and the release too, and the ray is
+// recast before it is used rather than trusted from the last frame.
 renderer.domElement.addEventListener('pointerdown', e => {
-  if (e.button === 0) downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (e.button !== 0) return;
+  readPointer(e);
+  downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
 });
 renderer.domElement.addEventListener('pointerup', e => {
   if (e.button !== 0 || !downAt) return;
   const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
   const held = performance.now() - downAt.t;
   downAt = null;
-  if (moved < 6 && held < 500) placeAttack();
+  if (moved >= 6 || held >= 500) return;      // that was an orbit, not a tap
+  readPointer(e);
+  if (planningNow()) { updateAim(); placeAttack(); return; }
+  aimPreviewAt();
 });
+renderer.domElement.addEventListener('pointercancel', () => { downAt = null; });
+
+// Moving the piece by tapping where you want it. On a touchscreen this is the
+// only way there is — nudge, rotate and raise are all keys — and it is the
+// gesture the saboteur already aims with, so the two sides read the same. It
+// stays on with a mouse because a tap that did not drag meant nothing during
+// a build phase before this, so there is nothing for it to take away.
+//
+// The height is deliberately left alone: spawnY already sits above the whole
+// tower, and dropping to the tapped surface instead would bury the piece in
+// whatever it was tapped on.
+function aimPreviewAt() {
+  if (!preview || paused || G.phase !== PHASE.BUILD || !buildLocal()) return;
+  const { point } = pickWorld();
+  if (!point) return;
+  let x = point.x, z = point.z;
+  const L = CFG.buildLimit, d = Math.hypot(x, z);
+  if (d > L) { x *= L / d; z *= L / d; }       // same leash the arrow keys pull against
+  previewPos.x = x; previewPos.z = z;
+  preview.mesh.position.copy(previewPos);
+  Snd.click(660);
+}
+
+// =====================================================================
+//  On-screen pads
+//  Only ever shown on a touchscreen, where the keys they stand in for do not
+//  exist. Holding one repeats it, because nudging a piece a third of a unit
+//  at a time across the table is otherwise a lot of tapping.
+// =====================================================================
+const PAD_ACTS = {
+  fwd:    () => movePreview(0, 0.35),
+  back:   () => movePreview(0, -0.35),
+  left:   () => movePreview(-0.35, 0),
+  right:  () => movePreview(0.35, 0),
+  up:     () => raisePreview(0.4),
+  down:   () => raisePreview(-0.4),
+  yawL:   () => rotatePreview('y'),
+  yawR:   () => { rotatePreview('y'); rotatePreview('y'); rotatePreview('y'); },
+  pitchF: () => rotatePreview('x'),
+  pitchB: () => { rotatePreview('x'); rotatePreview('x'); rotatePreview('x'); },
+};
+
+for (const btn of document.querySelectorAll('.pad button')) {
+  const act = PAD_ACTS[btn.dataset.act];
+  if (!act) continue;
+  let hold = null, rep = null;
+  // Rotation is a quarter turn a press: repeating it just spins the piece
+  // past what you were aiming for.
+  const repeatable = !/^(yaw|pitch)/.test(btn.dataset.act);
+  const fire = () => { if (G.phase === PHASE.BUILD && buildLocal() && !paused) act(); };
+  const stop = () => { clearTimeout(hold); clearInterval(rep); hold = rep = null; };
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    // Keeps the press with this button even if the finger slides off it.
+    btn.setPointerCapture?.(e.pointerId);
+    fire();
+    if (repeatable) hold = setTimeout(() => { rep = setInterval(fire, 90); }, 320);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) btn.addEventListener(ev, stop);
+}
+
+// What counts as a touch device changes under you: a laptop with a
+// touchscreen reports a fine pointer until a finger actually lands on it, and
+// a tablet with a keyboard attached is the same story in reverse. So the flag
+// is seeded from the media query and then corrected by the first real event
+// of either kind.
+function setTouch(on) {
+  const v = on ? '1' : '0';
+  if (document.body.dataset.touch !== v) document.body.dataset.touch = v;
+}
+setTouch(matchMedia('(pointer: coarse)').matches);
+addEventListener('pointerdown', e => { if (e.pointerType) setTouch(e.pointerType !== 'mouse'); }, true);
+addEventListener('keydown', e => { if (!e.metaKey && !e.ctrlKey) setTouch(false); }, true);
 renderer.domElement.addEventListener('contextmenu', e => {
   if (!planningNow()) return;
   e.preventDefault();
@@ -4358,7 +4785,7 @@ document.getElementById('pauseBtn').onclick = () => togglePause();
 
 // In a linked match only the host may start a new one; the guest asks.
 function askRestart() {
-  if (isGuest()) { netSend({ t: 'i', k: 'again' }); toast('ASKED', 'Waiting for the host to restart.', 1.4); return; }
+  if (isGuest()) { netSend({ t: 'i', k: 'again' }); toast('ASKED', 'Waiting for the host to restart.', 1.4, true); return; }
   restart(G.role, G.mode);
 }
 document.getElementById('restartBtn').onclick = askRestart;
@@ -4367,6 +4794,78 @@ document.getElementById('switchBtn').onclick = () => {
   if (G.mode !== MODE.SOLO) { askRestart(); return; }   // sides are not yours to swap in a linked match
   restart(isBuilder() ? ROLE.SABOTEUR : ROLE.BUILDER, MODE.SOLO);
 };
+// =====================================================================
+//  Menu
+//  One overlay wearing four faces — the root, the four modes, the lobby and
+//  the training options — with data-view deciding which is up. Routing it
+//  through one function is what keeps the panels from ever being on screen
+//  two at a time.
+// =====================================================================
+function showStart(view) {
+  const s = document.getElementById('start');
+  s.dataset.view = view;
+  s.classList.remove('hide');
+}
+
+// Leaving a match, from any mode. Self-play in particular will happily keep
+// grinding matches behind the overlay if it is only hidden rather than
+// stopped, so this goes through the same teardown a restart does.
+function toMenu() {
+  if (G.mode === MODE.PVP || NET.peer) netTeardown();
+  // Otherwise Back, or a reload, walks straight back into a dead room.
+  if (location.search) history.replaceState(null, '', location.pathname);
+  clearMatch();
+  G.started = false;
+  document.body.dataset.started = '0';
+  setPaused(false);
+  setPhase(PHASE.OVER, 1);
+  document.body.dataset.remote = '0';
+  updateNetPill();
+  showStart('root');
+  Snd.click(520);
+}
+
+document.getElementById('playBtn').onclick = () => showStart('modes');
+document.getElementById('modesBack').onclick = () => showStart('root');
+document.getElementById('optsBtn').onclick = () => { renderOpts(); showStart('opts'); };
+document.getElementById('optsBack').onclick = () => showStart('root');
+document.getElementById('menuBtn').onclick = toMenu;
+
+// The options are a list rendered from one table, so adding a setting is a
+// row in TRAIN_OPTS rather than a row of markup and a listener to match.
+function renderOpts() {
+  const host = document.getElementById('optsList');
+  host.innerHTML = '';
+  for (const o of TRAIN_OPTS) {
+    const row = document.createElement('label');
+    row.className = 'opt' + (TR.raw(o.k) ? ' on' : '');
+    row.innerHTML = `<span class="bx"></span><span><span class="ol"></span><div class="od"></div></span>`;
+    row.querySelector('.ol').textContent = o.label + (o.solo ? '  (solo only)' : '');
+    row.querySelector('.od').textContent = o.desc;
+    row.onclick = e => {
+      e.preventDefault();
+      row.classList.toggle('on', TR.toggle(o.k));
+      Snd.click(TR.raw(o.k) ? 700 : 420);
+      // 'Untimed' can be switched on mid-session from the pause menu route,
+      // and the turn already running should honour it rather than wait for
+      // the next one.
+      if (o.k === 'untimed' && G.started) applyUntimedNow();
+    };
+    host.appendChild(row);
+  }
+}
+
+// Turning the clock off should not mean sitting through the rest of the one
+// that was already ticking, and turning it back on should not hand you the
+// remainder of a million seconds.
+function applyUntimedNow() {
+  const mine = (G.phase === PHASE.BUILD && buildLocal()) || (G.phase === PHASE.PLAN && sabLocal());
+  if (!mine) return;
+  if (TR.get('untimed')) { G.t = G.tMax = UNTIMED; }
+  else if (G.tMax >= UNTIMED) { G.tMax = G.phase === PHASE.PLAN ? CFG.planTime : CFG.buildTime; G.t = G.tMax; }
+  document.body.dataset.untimed = G.tMax >= UNTIMED ? '1' : '0';
+}
+
 document.getElementById('roleBuilder').onclick = () => restart(ROLE.BUILDER, MODE.SOLO);
 document.getElementById('roleSaboteur').onclick = () => restart(ROLE.SABOTEUR, MODE.SOLO);
 document.getElementById('roleWatch').onclick = () => restart(ROLE.BUILDER, MODE.AUTO);
@@ -4376,7 +4875,7 @@ document.getElementById('sideBuilder').onclick = () => setHostSide(ROLE.BUILDER)
 document.getElementById('sideSaboteur').onclick = () => setHostSide(ROLE.SABOTEUR);
 document.getElementById('lobbyBack').onclick = () => {
   netTeardown();
-  document.getElementById('start').classList.remove('lobbying');
+  showStart('modes');
   // Drop the ?join= so Back does not bounce straight into the same dead room.
   if (location.search) history.replaceState(null, '', location.pathname);
 };
@@ -4394,7 +4893,7 @@ document.getElementById('copyBtn').onclick = () => {
 document.getElementById('trainReset').onclick = () => {
   Train.reset();
   Tele.reset();
-  toast('TRAINING RESET', 'Starting weights, and the balance ledger is empty.', 1.6);
+  toast('TRAINING RESET', 'Starting weights, and the balance ledger is empty.', 1.6, true);
 };
 
 document.getElementById('trainEval').onclick = () => {
@@ -4407,7 +4906,7 @@ document.getElementById('trainEval').onclick = () => {
 document.getElementById('trainReport').onclick = () => {
   const txt = Tele.report();
   console.log(txt);
-  const done = () => toast('BALANCE REPORT', 'Copied, and printed to the devtools console.', 1.8);
+  const done = () => toast('BALANCE REPORT', 'Copied, and printed to the devtools console.', 1.8, true);
   if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done, done);
   else done();
 };
@@ -4419,24 +4918,56 @@ for (const b of document.querySelectorAll('.spd')) {
   };
 }
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+function fitViewport() {
+  const w = innerWidth, h = innerHeight, a = w / h;
+  camera.aspect = a;
+  // A portrait screen is narrow, and what has to survive being narrow is the
+  // build zone: you can place a piece 4.6 units off the axis, and a lens that
+  // crops at 3 puts it somewhere off the side of the screen. So the lens is
+  // widened to just cover it — not to cover the whole table, which would cost
+  // so much vertical framing that the tower ends up a thumbnail in the middle
+  // of an empty screen. The corners of the table falling out of frame is fine;
+  // nothing is ever built there.
+  const halfNeed = 5.0, at = 17;
+  camera.fov = a >= 1 ? 50
+    : Math.min(64, Math.max(50, 2 * Math.atan(halfNeed / (at * Math.max(0.4, a))) * 180 / Math.PI));
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+  renderer.setSize(w, h);
+  // A phone at devicePixelRatio 3 is drawing nine pixels for every one it
+  // needs to, which is the difference between a smooth siege and a slideshow.
+  renderer.setPixelRatio(Math.min(matchMedia('(pointer: coarse)').matches ? 1.75 : 2, devicePixelRatio));
+}
+
+// Rotating the device is the one moment it is fair to move the camera for
+// you. Doing it on every resize would undo a zoom the instant the URL bar
+// slid away, so this is not wired to resize.
+function reframe() {
+  // 15 is just inside the default framing, so a landscape screen is left
+  // exactly where it was and only portrait actually pulls back — to the same
+  // distance the lens above was widened for.
+  const want = innerWidth / innerHeight >= 1 ? 15 : 17;
+  if (camera.position.distanceTo(controls.target) >= want) return;
+  camera.position.sub(controls.target).setLength(want).add(controls.target);
+  controls.update();
+}
+
+addEventListener('resize', fitViewport);
+// Mobile browsers resize the visual viewport, not the window, when the URL
+// bar collapses; without this the canvas is left short by its height.
+visualViewport?.addEventListener('resize', fitViewport);
+addEventListener('orientationchange', () => setTimeout(() => { fitViewport(); reframe(); }, 150));
+fitViewport();
+reframe();
 
 // =====================================================================
 //  Restart
 // =====================================================================
-function restart(role = G.role, mode = G.mode) {
-  G.role = role;
-  G.mode = mode;
-  G.started = true;
-  document.body.dataset.role = role;
-  document.body.dataset.mode = mode;
-  document.body.dataset.remote = '0';
-  document.getElementById('start').classList.add('hide');
-  document.getElementById('start').classList.remove('lobbying');
+// Everything that has to be true before a match can begin, which is exactly
+// what has to be true after one is abandoned. Starting a new match and walking
+// out to the menu are the same teardown with different endings, and keeping
+// them as one function is what stops the menu from being the one path that
+// forgets to stop a running attack or clear the table.
+function clearMatch() {
   if (G.running) { G.running.stop(); G.running = null; }
   forcers.clear();      // nothing survives a restart still pushing on the table
   for (const b of blocks.slice()) removeBlock(b);
@@ -4468,6 +4999,26 @@ function restart(role = G.role, mode = G.mode) {
   G.builtThisRound = false; G.openingRound = false;
   charging = null;
   anchorArmed = false; keyArmed = false; tool = null;
+  aimCursor.visible = aimBox.visible = poolCursor.visible = false;
+  document.getElementById('aimHint').classList.remove('show');
+  document.getElementById('overTitle').classList.remove('win');
+  document.getElementById('over').classList.remove('show');
+  previewQuat.identity(); previewPos.set(0, 4, 0);
+  netClearMirror();
+}
+
+function restart(role = G.role, mode = G.mode) {
+  G.role = role;
+  G.mode = mode;
+  G.started = true;
+  document.body.dataset.started = '1';
+  document.body.dataset.role = role;
+  document.body.dataset.mode = mode;
+  document.body.dataset.remote = '0';
+  document.getElementById('start').classList.add('hide');
+  clearMatch();
+  // Whatever you last chose to play is what 'Straight into the game' means.
+  if (mode !== MODE.PVP) TR.rememberGame(role, mode);
 
   // Seeded here, after the old match has been torn down and before a single
   // card is dealt. Tearing down draws too — a snapped anchor throws bolts — and
@@ -4482,12 +5033,6 @@ function restart(role = G.role, mode = G.mode) {
   pieceQueue.length = 0;
   refillDeal();
   renderDeal();
-  aimCursor.visible = aimBox.visible = poolCursor.visible = false;
-  document.getElementById('aimHint').classList.remove('show');
-  document.getElementById('overTitle').classList.remove('win');
-  previewQuat.identity(); previewPos.set(0, 4, 0);
-  document.getElementById('over').classList.remove('show');
-  netClearMirror();
   if (mode === MODE.AUTO) { Train.beginMatch(); } else { AI.load(); }
   updateHelp();
   updateNetPill();
@@ -4569,7 +5114,7 @@ let hostSide = ROLE.BUILDER;
 function lobbySay(html) { document.getElementById('lobbyStatus').innerHTML = html; }
 
 function openLobby(joining) {
-  document.getElementById('start').classList.add('lobbying');
+  showStart('lobby');
   document.getElementById('lobbyTitle').textContent = joining ? 'Joining a game' : 'Play a friend';
   document.getElementById('lobbySub').textContent = joining
     ? 'Connecting to the game you were sent. The host picks the sides.'
@@ -4657,7 +5202,7 @@ function netDropped() {
   if (!NET.ready) return;
   NET.ready = false;
   updateNetPill();
-  if (G.started) toast('DISCONNECTED', 'The other player dropped out.', 3);
+  if (G.started) toast('DISCONNECTED', 'The other player dropped out.', 3, true);
   else lobbySay('<span class="err">The other player dropped out.</span>');
 }
 
@@ -5095,6 +5640,19 @@ function autoTick(dt) {
   if (autoWait > 2.2) { autoWait = 0; restart(G.role, MODE.AUTO); }
 }
 
+// The same idea for a human drilling an opening: the match ends, the next one
+// deals itself, same side, and the only thing between them is a beat long
+// enough to read the final score — or barely any beat at all if the recap is
+// switched off too. Self-play has its own driver above; link play never gets
+// here, because a match that restarted itself would drag the other player
+// into a game they did not ask for.
+let againWait = 0;
+function autoAgainTick(dt) {
+  if (!G.started || G.mode === MODE.AUTO || !TR.get('again') || G.phase !== PHASE.OVER) { againWait = 0; return; }
+  againWait += dt;
+  if (againWait > (TR.get('noRecap') ? 0.5 : 1.5)) { againWait = 0; restart(G.role, G.mode); }
+}
+
 // =====================================================================
 //  Main loop
 // =====================================================================
@@ -5320,6 +5878,7 @@ function animate(now) {
   netHostTick(real);
   netGuestTick(real);
   autoTick(real);
+  autoAgainTick(real);
 
   // Live height readout. Uses every block so it doesn't blink to 0 mid-siege;
   // the peak beside it only counts blocks that have come to rest, and is
@@ -5375,6 +5934,9 @@ window.SIEGE = { G, CFG, blocks, hazards, slicks, world, forcers, camera, Snd, m
   armed: () => anchorArmed,
   aiState: () => ({ swaps: aiSwaps, hand: aiHand && PIECE_NAMES[aiHand.idx], placed: aiPlaced }),
   forcePreviewTo: (x, z, y) => { previewPos.set(x, y, z); spawnY = y; if (preview) preview.mesh.position.copy(previewPos); },
+  previewAt: () => preview ? { x: +previewPos.x.toFixed(3), y: +previewPos.y.toFixed(3), z: +previewPos.z.toFixed(3) } : null,
+  trainOpts: () => TRAIN_OPTS.map(o => ({ k: o.k, raw: TR.raw(o.k), active: TR.get(o.k) })),
+  againState: () => ({ wait: +againWait.toFixed(2), started: G.started, phase: G.phase, mode: G.mode, on: TR.get('again') }),
   profiles: () => FACTORIES.map((f, i) => PIECE_NAMES[i] + ': ' + ORIENTS.map(o => {
     const p = orientProfile(i, o);
     return `y${o.yaw}p${o.pitch} base ${p.base.toFixed(2)} top ${p.top.toFixed(2)} h ${(p.half * 2).toFixed(2)}`;
@@ -5433,6 +5995,7 @@ window.SIEGE = { G, CFG, blocks, hazards, slicks, world, forcers, camera, Snd, m
 Theme.mount();
 G.started = false;
 G.scoreB = 0; G.scoreS = 0;
+document.body.dataset.started = '0';
 document.body.dataset.role = ROLE.BUILDER;
 document.body.dataset.mode = MODE.SOLO;
 document.body.dataset.remote = '0';
@@ -5454,10 +6017,17 @@ renderTrain();
 updateHelp();
 updateHUD();
 
+renderOpts();
+
 // A link that carries a room id goes straight into the lobby and connects.
+// It outranks 'Straight into the game': someone is waiting at the other end.
 {
   const room = new URLSearchParams(location.search).get('join');
   if (room) netJoin(room);
+  else if (TR.raw('skipMenu')) {
+    const last = TR.lastGame();
+    if (last && last.role && last.mode && last.mode !== MODE.PVP) restart(last.role, last.mode);
+  }
 }
 
 requestAnimationFrame(animate);
