@@ -597,6 +597,8 @@
 
 <div id="train" class="panel">
   <h3>Self-play training</h3>
+  <div class="trow"><span class="k">Ruleset</span><span class="v" id="trRules">—</span></div>
+  <div class="trow"><span class="k">On this ruleset</span><span class="v" id="trRuleRec">—</span></div>
   <div class="trow"><span class="k">Matches played</span><span class="v" id="trMatches">0</span></div>
   <div class="trow"><span class="k">This match</span><span class="v" id="trLive">round 1</span></div>
   <div class="trow" id="trEvalRow" style="display:none"><span class="k">Measured</span><span class="v" id="trEval">—</span></div>
@@ -749,6 +751,12 @@ const CFG = {
   buildTime: 19,            // every later build phase
   piecesFirst: 6,           // placements allowed in round 1
   piecesPerRound: 4,        // placements allowed after that
+  // The saboteur's budget and its damage both climb with the round. If the
+  // builder's ration does not climb with them it is answering a siege that
+  // roughly triples in size with the same four blocks it started with, and the
+  // match is decided by the curve rather than by either side's play.
+  piecesRampEvery: 3,       // +1 placement every this many rounds
+  piecesMax: 7,             // ... up to this many
   attackGap: 0.75,          // pause between consecutive attacks
   settleTime: 3.2,          // max wait for the tower to stop moving
   summaryTime: 2.4,
@@ -760,27 +768,87 @@ const CFG = {
   swapsFirst: 3,            // piece changes allowed in round 1
   swapsPerRound: 2,         // ... and in every round after it
   slickRadius: 1.25,        // grease poured on the table spreads this far
-  flawlessRatio: 0.96,      // keep this much height through a siege -> Ward, and the saboteur loses patience
+  // The two win conditions have to be comparably hard to hit or the match is
+  // decided before either side plays. At 0.96/0.25 the builder was aiming at a
+  // four-point window while the saboteur had seventy-five points to land in,
+  // and everything in between was a null round that only the saboteur's growing
+  // budget benefited from.
+  flawlessRatio: 0.85,      // keep this much height through a siege -> Ward, and the saboteur loses patience
   struts: 3,                // builder's structural integrity; hits zero -> saboteur wins
   patience: 4,              // saboteur's patience; a flawless round costs one
-  damageLoss: 0.25,         // lose this share of your height in one siege -> -1 strut
+  damageLoss: 0.35,         // lose this share of your height in one siege -> -1 strut
   severeLoss: 0.60,         // ... a rout costs two
+  // A tower flattened to nothing takes an automatic strut, which on its own is
+  // an unrecoverable spiral: too short to rebuild past the floor, so the next
+  // round takes another one and the match is over with no counterplay left.
+  // One round's grace is enough to get back off the ground.
+  razeGrace: 1,             // rounds after a raze that do not take the automatic strut
   killY: -6,
   planTime: 30,             // saboteur's placement phase
   aiBuildStep: 1.5,         // seconds between AI builder placements
   energyBase: 6,            // saboteur energy = base + 1.5/round, capped
-  energyMax: 14,
+  energyMax: 10,            // 5 attacks at the cheap end, not 7
+  // Wards used to be earned only on a flawless round, which gated the builder's
+  // one defensive resource behind the exact outcome it exists to produce: if
+  // you were behind you could never obtain the thing that stops you being
+  // behind. The flawless Ward is still there on top of this.
+  wardEvery: 2,             // rounds between free Wards
   // Surge rounds. Every fifth round is the heavy one: the saboteur's whole kit
   // comes out in its empowered form and the builder is handed a Keystone to
   // answer with. Both sides know it is coming, which is the point — it gives
   // the match a rhythm to build towards instead of a flat grind.
   surgeEvery: 5,
-  surgePower: 1.8,          // how much harder an empowered attack lands
+  surgePower: 1.6,          // how much harder an empowered attack lands
   surgeCost: 2,             // what the empowered form adds to a tool's price
-  surgeEnergy: 5,           // extra budget that round, or nothing is affordable
+  // Empowered tools, harder hits and a bigger budget was three buffs against
+  // the builder's one Keystone. The empowerment is the surge; the budget only
+  // has to cover the surcharge.
+  surgeEnergy: 2,           // extra budget that round, or nothing is affordable
   keystoneGrant: 1,         // super anchors handed out per surge round
   maxKeystones: 2,
+  // Global dial on how hard every attack lands, and how fast that climbs with
+  // the round. Kept here rather than in the five make* functions so the tools
+  // stay balanced against each other while the whole siege is tuned.
+  attackPower: 0.85,        // flat multiplier on every attack's magnitude
+  powerRamp: 0.05,          // added per round past the first
+  powerMax: 1.5,            // ceiling on the ramp, before attackPower
 };
+
+// =====================================================================
+//  Ruleset version
+//  A win rate only means something next to the rules that produced it. Every
+//  match is filed under the ruleset it was played on, so tightening a number
+//  and re-measuring compares two records instead of dragging an average across
+//  a change and measuring neither.
+//
+//  ID is set by hand and names a deliberate balance pass. The hash covers the
+//  numbers a win rate actually depends on, so a tweak made without bumping the
+//  ID still lands in its own bucket rather than silently joining the previous
+//  one. Cosmetic and timing values are deliberately outside it: changing the
+//  build clock or a colour should not orphan the record.
+// =====================================================================
+const RULES = (() => {
+  const ID = '2.0';
+  const KEYS = [
+    'flawlessRatio', 'damageLoss', 'severeLoss', 'struts', 'patience', 'razeGrace',
+    'energyBase', 'energyMax', 'attackPower', 'powerRamp', 'powerMax',
+    'surgeEvery', 'surgePower', 'surgeCost', 'surgeEnergy', 'keystoneGrant', 'maxKeystones',
+    'piecesFirst', 'piecesPerRound', 'piecesRampEvery', 'piecesMax',
+    'wardEvery', 'maxWards', 'startAnchors', 'maxAnchors', 'swapsFirst', 'swapsPerRound',
+  ];
+  // FNV-1a. Short, stable across reloads, and no dependency.
+  const body = KEYS.map(k => `${k}=${CFG[k]}`).join(';');
+  let h = 2166136261;
+  for (let i = 0; i < body.length; i++) { h ^= body.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return {
+    id: ID,
+    tag: `${ID}+${(h >>> 0).toString(36).padStart(7, '0').slice(-4)}`,
+    keys: KEYS,
+    // The numbers behind the tag, for the report. Reading a record six weeks
+    // later is useless if you cannot see what it was a record of.
+    values: () => KEYS.map(k => `${k}=${CFG[k]}`).join(' '),
+  };
+})();
 
 // =====================================================================
 //  Skins
@@ -1146,9 +1214,19 @@ const AI = {
 //  contentedly at 50% on top of a badly unfair ruleset.
 // =====================================================================
 const Train = (() => {
-  const KEY = 'siege.train.v1';
+  // v2: the weight file gained a training focus, and v1 ratings were produced by
+  // the old fitness function so they are not comparable to the new ones.
+  const KEY = 'siege.train.v2';
   const SIG0 = 0.25, SIG_MIN = 0.03, SIG_MAX = 0.45;
   const BATCH = 4;      // matches per candidate before it is accepted or dropped
+  // Only one side is perturbed at a time. Moving both at once measures every
+  // candidate against an opponent that is also moving, so a candidate that is
+  // genuinely better can be scored worse simply because it drew a good opposing
+  // draw, and the whole thing is credit assignment on noise. It is worst for
+  // whichever side is losing: when the builder wins 3% of matches almost every
+  // candidate it tries scores a loss, the accept test falls through to the
+  // shaping terms, and it learns whatever those happen to reward.
+  const FOCUS_SPAN = 20 * BATCH;   // matches on one side before handing over
   let st = null;
 
   const blankSide = w => ({ best: defaults(w), fit: null, gen: 0, sigma: SIG0,
@@ -1158,6 +1236,8 @@ const Train = (() => {
     matches: 0,
     evalMode: false,
     eval: { matches: 0, bldWins: 0 },
+    focus: 'bld',       // the side currently being trained
+    focusAt: 0,         // st.matches when it took the focus
     bld: blankSide(WSPEC.bld),
     sab: blankSide(WSPEC.sab),
   });
@@ -1178,6 +1258,8 @@ const Train = (() => {
       }
       if (typeof st.matches !== 'number') st.matches = 0;
       if (!st.eval) st.eval = { matches: 0, bldWins: 0 };
+      if (st.focus !== 'bld' && st.focus !== 'sab') st.focus = 'bld';
+      if (typeof st.focusAt !== 'number') st.focusAt = st.matches;
       st.evalMode = !!st.evalMode;
     } catch (e) { st = blank(); }
     return st;
@@ -1200,14 +1282,34 @@ const Train = (() => {
     return o;
   }
 
-  // What each side is actually being rewarded for. The builder wants a tall
-  // tower that is still there at the end; the saboteur wants metres on the
-  // floor and struts broken. Both get a win bonus big enough to dominate.
+  // What each side is actually being rewarded for.
+  //
+  // The shaping terms exist to give a gradient in matches that were lost, so
+  // they have to point the same way as the win. The saboteur's always did:
+  // metres on the floor and broken struts are how it wins. The builder's did
+  // not, and the reason is subtler than the weights make it look.
+  //
+  // The old builder terms were certPeak*140 + round*45 + integrity*70 against a
+  // win bonus of 700. Head to head that still usually prefers a win: a losing
+  // builder had to reach about 8.5m, or stall about twelve rounds, to outscore
+  // a 3m winner. The problem is what happens when the builder is losing badly.
+  // At a 3% win rate every candidate in a batch loses, so the win term is a
+  // constant zero across the whole comparison and the accept test is decided
+  // purely by certPeak and round count. The search then climbs the height
+  // gradient exclusively, which is how self-play ended up building something
+  // spectacular and fragile. Once that is the champion the win rate cannot
+  // recover, and the ranking never gets a win in it to steer by again.
+  //
+  // So: the win dominates outright, integrity (which is the actual win
+  // condition, and which varies among losses) carries the shaping, and height
+  // is a tiebreak rather than the objective.
+  const WIN = 3000;
   function fitness(side, builderWon) {
     if (side === 'bld')
-      return G.certPeak * 140 + G.round * 45 + G.integrity * 70 + (builderWon ? 700 : 0) + G.scoreB * 0.05;
-    return G.totalLost * 70 + G.totalDestroyed * 25 + (CFG.struts - G.integrity) * 160
-         + (builderWon ? 0 : 700) + G.scoreS * 0.05;
+      return (builderWon ? WIN : 0) + G.integrity * 200 + G.certPeak * 40
+           + G.round * 15 + G.scoreB * 0.01;
+    return (builderWon ? 0 : WIN) + (CFG.struts - G.integrity) * 250
+         + G.totalLost * 40 + G.totalDestroyed * 15 + G.scoreS * 0.01;
   }
 
   return {
@@ -1220,6 +1322,9 @@ const Train = (() => {
         const rec = s[side];
         // Measuring: both champions play themselves, unperturbed.
         if (s.evalMode) { AI[side] = { ...rec.best }; continue; }
+        // Off the focus: play the champion, unperturbed. This is the fixed
+        // opponent the focused side's candidates are all scored against.
+        if (side !== s.focus) { rec.cand = null; AI[side] = { ...rec.best }; continue; }
         // A candidate is held for the whole batch, so the mean it is judged on
         // is a mean of the same weights and not of BATCH different ones.
         if (!rec.cand || rec.pend === 0) {
@@ -1253,6 +1358,9 @@ const Train = (() => {
         if (won) rec.wins++;
         rec.recent.push(won ? 1 : 0);
         if (rec.recent.length > 30) rec.recent.shift();
+        // The frozen side still books the result for the win-rate readout, but
+        // it has no candidate in flight so there is nothing to accept or drop.
+        if (side !== s.focus) continue;
 
         // Nothing is decided until the candidate has been seen enough times for
         // the bounce of the physics to average out of the number.
@@ -1276,6 +1384,20 @@ const Train = (() => {
         }
         rec.cand = null;
       }
+
+      // Hand the focus over on a batch boundary, so a candidate is never left
+      // half-judged against an opponent that is about to start moving.
+      if (s.matches - s.focusAt >= FOCUS_SPAN && s[s.focus].pend === 0) {
+        s.focus = s.focus === 'bld' ? 'sab' : 'bld';
+        s.focusAt = s.matches;
+        // The incoming side's rating was earned against the *previous* version
+        // of its opponent. Keeping it would mean the first candidate of the new
+        // span has to beat a score from an easier match to be accepted, which
+        // stalls the search for a whole span. Clearing it makes the first batch
+        // a fresh baseline against who it is actually facing now.
+        s[s.focus].fit = null;
+        s[s.focus].sigma = SIG0;
+      }
       write();
       renderTrain();
     },
@@ -1284,6 +1406,7 @@ const Train = (() => {
     // measuring instrument, so it gets its own switch rather than a flag buried
     // in a config object.
     isEval() { return !!read().evalMode; },
+    focus() { return read().focus; },
     setEval(on) {
       const s = read();
       s.evalMode = !!on;
@@ -1323,7 +1446,10 @@ const Train = (() => {
 //  from the one the numbers would claim to describe.
 // =====================================================================
 const Tele = (() => {
-  const KEY = 'siege.tele.v1';
+  // v2 alongside the weights: a ledger accumulated under the old thresholds and
+  // the old energy curve describes a game that no longer exists, and averaging
+  // it together with the new one measures neither.
+  const KEY = 'siege.tele.v2';
   let st = null;
 
   const blankTool = () => ({ picked: 0, warded: 0, energy: 0, spent: 0, lost: 0, killed: 0,
@@ -1543,7 +1669,8 @@ const Tele = (() => {
       const tr = Train.read();
 
       L.push('TOWER SIEGE — balance report' + (s.label ? '  [' + s.label + ']' : ''));
-      L.push(Train.isEval() ? 'measurement run: champions frozen' : 'training run: both sides mutating, treat the win rate with suspicion');
+      L.push(`ruleset ${RULES.tag}`);
+      L.push(Train.isEval() ? 'measurement run: champions frozen' : `training run: ${Train.focus()} is searching, the other side is frozen`);
       L.push(`dice: base ${RNG.base}, so match k of this run replays as seed ${RNG.base}+k`);
       L.push('');
       L.push(`matches        ${s.matches}   (${(s.rounds / s.matches).toFixed(1)} rounds each)`);
@@ -1584,6 +1711,14 @@ const Tele = (() => {
                + ks.slice(i, i + 5).map(k => `${k}=${tr[side].best[k].toFixed(2)}`).join('  '));
       }
       L.push('');
+      // Everything above describes the current ruleset only. This is the part
+      // that says whether it is an improvement on the last one.
+      L.push('RULESET HISTORY');
+      L.push(Hist.table());
+      L.push('');
+      L.push('RULESET NUMBERS');
+      L.push(Hist.detail());
+      L.push('');
       L.push('WORTH A LOOK');
       const F = this.flags();
       if (!F.length) L.push('nothing stood out.');
@@ -1604,9 +1739,129 @@ const Tele = (() => {
   };
 })();
 
+// =====================================================================
+//  Ruleset ledger
+//  One record per ruleset, surviving Reset training — that button clears the
+//  weights and the balance ledger on purpose, but the win/loss history is the
+//  one thing you want to keep across a rules change, since comparing to the
+//  previous ruleset is the entire point of having it.
+//
+//  Three counters per record, kept apart because they answer different
+//  questions. Training is a moving target and its win rate says more about
+//  where the optimiser is than about the game. Measured is champions frozen,
+//  which is the number to quote. Played is human matches, which is the only
+//  one that reflects how the game actually feels to a person.
+// =====================================================================
+const Hist = (() => {
+  const KEY = 'siege.history.v1';
+  let st = null;
+
+  const blankRec = tag => ({
+    tag,
+    train:    { matches: 0, bldWins: 0 },
+    measured: { matches: 0, bldWins: 0 },
+    played:   { matches: 0, youWins: 0 },
+    reason:   {},          // collapsed / worn / outlasted
+    rounds:   0,           // summed, for a mean match length
+    cfg:      RULES.values(),
+    first:    null,        // ISO date the ruleset was first played
+    last:     null,
+  });
+
+  function read() {
+    if (st) return st;
+    try {
+      const raw = localStorage.getItem(KEY);
+      st = raw ? JSON.parse(raw) : { order: [], recs: {} };
+      if (!Array.isArray(st.order)) st.order = [];
+      if (!st.recs || typeof st.recs !== 'object') st.recs = {};
+    } catch (e) { st = { order: [], recs: {} }; }
+    return st;
+  }
+  function write() { try { localStorage.setItem(KEY, JSON.stringify(read())); } catch (e) {} }
+
+  function cur() {
+    const s = read();
+    if (!s.recs[RULES.tag]) {
+      s.recs[RULES.tag] = blankRec(RULES.tag);
+      s.order.push(RULES.tag);
+    }
+    return s.recs[RULES.tag];
+  }
+
+  const pc = (w, n) => n ? `${Math.round(w / n * 100)}%` : '—';
+
+  return {
+    tag: RULES.tag,
+    current: cur,
+    all() { const s = read(); return s.order.map(t => s.recs[t]).filter(Boolean); },
+
+    // Called once per finished match, whoever was playing.
+    record(reason, builderWon, youWon, round, mode, measuring) {
+      const r = cur();
+      const day = new Date().toISOString().slice(0, 10);
+      if (r.first === null) r.first = day;
+      r.last = day;
+      r.reason[reason] = (r.reason[reason] || 0) + 1;
+      r.rounds += round;
+      if (mode === MODE.AUTO) {
+        const bucket = measuring ? r.measured : r.train;
+        bucket.matches++;
+        if (builderWon) bucket.bldWins++;
+      } else {
+        r.played.matches++;
+        if (youWon) r.played.youWins++;
+      }
+      write();
+    },
+
+    // One line per ruleset, oldest first. This is what makes a balance change
+    // legible: the row above is what the row below was supposed to improve on.
+    table() {
+      const recs = this.all();
+      if (!recs.length) return 'no matches recorded yet.';
+      const cell = (w, n, who) => (n ? `${pc(w, n)} ${who}/${n}` : '—').padEnd(14);
+      const L = ['ruleset      measured      training      played        avg rounds  dates'];
+      for (const r of recs) {
+        const n = r.train.matches + r.measured.matches + r.played.matches;
+        L.push(
+          (r.tag + (r.tag === RULES.tag ? ' *' : '  ')).padEnd(13) +
+          cell(r.measured.bldWins, r.measured.matches, 'bld') +
+          cell(r.train.bldWins, r.train.matches, 'bld') +
+          cell(r.played.youWins, r.played.matches, 'you') +
+          (n ? (r.rounds / n).toFixed(1) : '—').padEnd(12) +
+          `${r.first || '—'}..${r.last || '—'}`);
+      }
+      L.push('* current. "bld" is the builder win rate, so 50% is even.');
+      return L.join('\n');
+    },
+
+    // The numbers behind each tag, so a record still means something later.
+    detail() {
+      return this.all().map(r => `${r.tag}\n  ${r.cfg || '(not recorded)'}`).join('\n');
+    },
+
+    forget() { st = { order: [], recs: {} }; write(); },
+  };
+})();
+
 function renderTrain() {
   const s = Train.read();
   const ev = !!s.evalMode;
+
+  // The ruleset this record belongs to, and the record itself. Measured beats
+  // training as the headline whenever there is any of it, since frozen
+  // champions are the only win rate that describes the game rather than the
+  // optimiser's current position.
+  document.getElementById('trRules').textContent = Hist.tag;
+  const rec = Hist.current();
+  const src = rec.measured.matches ? ['measured', rec.measured.bldWins, rec.measured.matches]
+            : rec.train.matches    ? ['training', rec.train.bldWins, rec.train.matches]
+            : rec.played.matches   ? ['played', rec.played.youWins, rec.played.matches]
+            : null;
+  document.getElementById('trRuleRec').textContent = !src ? 'no matches yet'
+    : `${Math.round(src[1] / src[2] * 100)}% ${src[0] === 'played' ? 'you' : 'bld'} / ${src[2]} ${src[0]}`;
+
   document.getElementById('trMatches').textContent = s.matches;
   document.getElementById('trLive').textContent =
     G.phase === PHASE.OVER ? 'match over' : `round ${Math.max(1, G.round)}`;
@@ -1622,9 +1877,13 @@ function renderTrain() {
   for (const [side, pfx] of [['bld', 'trBld'], ['sab', 'trSab']]) {
     const rec = s[side];
     // While training, say where the current candidate is in its batch: a
-    // generation only moves once the whole batch has been played.
+    // generation only moves once the whole batch has been played. Only one side
+    // is searching at a time, so the other says so rather than showing a batch
+    // position that is not moving.
     document.getElementById(pfx + 'Gen').textContent =
-      ev ? 'frozen' : `gen ${rec.gen} · ${rec.pend}/${Train.batch}`;
+      ev ? 'frozen'
+         : side === s.focus ? `gen ${rec.gen} · ${rec.pend}/${Train.batch}`
+                            : `gen ${rec.gen} · holding`;
     document.getElementById(pfx + 'Fit').textContent = rec.fit === null ? '—' : Math.round(rec.fit);
     const wr = Train.winRate(side);
     document.getElementById(pfx + 'Win').textContent = Math.round(wr * 100) + '%';
@@ -2133,6 +2392,7 @@ const G = {
   surge: false,     // is this one of them?
   integrity: CFG.struts,
   patience: CFG.patience,
+  razeGrace: CFG.razeGrace,   // free razes left before the automatic strut bites
   energy: 0,             // saboteur's placement budget this round
   destroyedThisRound: 0, // blocks knocked off the table during the siege
   attacksWeathered: 0,
@@ -2724,8 +2984,17 @@ function loadAbove(blk) {
 //  Attack planning — the Saboteur's turn is decided *before* you build,
 //  so every threat is telegraphed and you can build around it.
 // =====================================================================
+// The two curves that grow over a match, kept next to each other because they
+// only mean anything relative to one another: how much harder the siege lands
+// each round, and how much more the builder gets to answer it with.
 function powerScale(sup) {
-  return Math.min(1.85, 1 + (G.round - 1) * 0.085) * (sup ? CFG.surgePower : 1);
+  const ramp = Math.min(CFG.powerMax, 1 + (G.round - 1) * CFG.powerRamp);
+  return ramp * CFG.attackPower * (sup ? CFG.surgePower : 1);
+}
+
+function roundPieces(round) {
+  return Math.min(CFG.piecesMax,
+                  CFG.piecesPerRound + Math.floor(round / CFG.piecesRampEvery));
 }
 
 // A tool is only offered if it has something to bite on. Without this the AI
@@ -4055,7 +4324,7 @@ function startRound() {
   // Resolve anchors that were still pending, then clear last round's wreckage.
   for (const b of blocks) if (b.pendingAnchor) tryApplyAnchor(b, true);
   clearRoundHazards();
-  G.piecesLeft = G.round === 1 ? CFG.piecesFirst : CFG.piecesPerRound;
+  G.piecesLeft = G.round === 1 ? CFG.piecesFirst : roundPieces(G.round);
   G.swaps = G.round === 1 ? CFG.swapsFirst : CFG.swapsPerRound;   // swaps do not carry over
   G.atkIndex = -1;
   G.destroyedThisRound = 0;
@@ -4272,21 +4541,32 @@ function finishRound() {
   // flattened or never built. Without this a builder who does nothing at all
   // can neither win nor lose, and the match never ends.
   const razed = after < 0.5;
-  if (razed) dmg = Math.max(dmg, 1);
+  // ... unless the site was already bare going in. A builder that has just been
+  // flattened cannot clear the floor again in one build phase, so charging for
+  // it every round is a loss with no move left to make. The grace only covers
+  // rounds that started from nothing: get back up and the rule applies again.
+  const razeGraced = razed && G.razeGrace > 0;
+  if (razed && !razeGraced) dmg = Math.max(dmg, 1);
+  G.razeGrace = razed ? (razeGraced ? G.razeGrace - 1 : 0) : CFG.razeGrace;
   G.integrity -= dmg;
 
   // The two sides race each other: struts down means the tower falls, patience
   // down means the saboteur gives up and the builder wins. A round the saboteur
   // sat out still counts as a clean one, or stalling would be a strategy — it
   // just does not pay a bonus or a Ward, since nothing was actually tested.
+  const grantWard = () => {
+    const had = G.wards;
+    G.wards = Math.min(CFG.maxWards, G.wards + 1);
+    Tele.ward(G.wards > had ? 'earned' : 'capped');
+  };
   if (held) {
     G.patience--;
-    if (hit) {
-      const had = G.wards;
-      G.wards = Math.min(CFG.maxWards, G.wards + 1);
-      Tele.ward(G.wards > had ? 'earned' : 'capped');
-    }
+    if (hit) grantWard();
   }
+  // The ration Ward, independent of how the round went. This is the one that
+  // makes a losing position playable: the flawless Ward above only ever arrived
+  // in rounds that did not need it.
+  if (G.round % CFG.wardEvery === 0) grantWard();
   if (G.round % 2 === 0) G.anchors = Math.min(CFG.maxAnchors, G.anchors + 1);
 
   const lostMetres = Math.max(0, G.heightBefore - after);
@@ -4373,7 +4653,12 @@ function gameOver(reason) {
   // Self-play scores the match and rolls straight into the next one; nothing
   // here is on a click, so the panel is the only place progress shows.
   Tele.match(reason, builderWon, G.round);
+  // Filed against the ruleset before the trainer is told, because finishMatch
+  // is what can flip eval mode's counters and we want the bucket this match was
+  // actually played in.
+  Hist.record(reason, builderWon, youWon, G.round, G.mode, Train.isEval());
   if (G.mode === MODE.AUTO) Train.finishMatch(builderWon);
+  renderTrain();
 }
 
 // A clock long enough that nothing reaches the end of it in a sitting, rather
@@ -4890,10 +5175,21 @@ document.getElementById('copyBtn').onclick = () => {
 // Changing the rules invalidates both the champions and the ledger: weights
 // trained against the old costs are playing a game that no longer exists, and
 // mixing two rulesets into one average measures neither.
-document.getElementById('trainReset').onclick = () => {
+//
+// The ruleset history is deliberately not cleared. It is the one record whose
+// whole value is spanning a rules change, and wiping it here would throw away
+// the previous ruleset's result at exactly the moment you are about to want to
+// compare against it. Shift-click if you really do want it gone.
+document.getElementById('trainReset').onclick = e => {
   Train.reset();
   Tele.reset();
-  toast('TRAINING RESET', 'Starting weights, and the balance ledger is empty.', 1.6, true);
+  if (e.shiftKey) {
+    Hist.forget();
+    renderTrain();
+    toast('TRAINING RESET', 'Weights, ledger and ruleset history all cleared.', 1.8, true);
+  } else {
+    toast('TRAINING RESET', `Starting weights, empty ledger. Ruleset history kept (${Hist.all().length} on file).`, 1.8, true);
+  }
 };
 
 document.getElementById('trainEval').onclick = () => {
@@ -4992,6 +5288,7 @@ function clearMatch() {
   G.peak = 0; G.certPeak = 0; G.heightNow = 0; G.heightBefore = 0;
   G.anchors = CFG.startAnchors; G.wards = 0; G.attacksWeathered = 0; G.integrity = CFG.struts;
   G.patience = CFG.patience; G.energy = 0; G.destroyedThisRound = 0;
+  G.razeGrace = CFG.razeGrace;
   G.keystones = 0; G.surge = false; document.body.dataset.surge = '0';
   document.getElementById('rowSurge').style.display = 'none';
   G.queue = []; G.atkIndex = -1; G.attacksThisRound = 0;
@@ -5920,7 +6217,9 @@ function animate(now) {
 window.SIEGE = { G, CFG, blocks, hazards, slicks, world, forcers, camera, Snd, measureHeight, startSiege, startRound, restart,
   finishRound, gameOver,
   aimState: () => ({ tool, point: hoverPoint ? hoverPoint.toArray().map(n => +n.toFixed(2)) : null, block: !!hoverBlock }),
-  NET, AI, Train, Tele, RNG,
+  NET, AI, Train, Tele, RNG, RULES, Hist,
+  // SIEGE.Hist.table() is the one-screen answer to "did that change help".
+  rules: () => ({ tag: RULES.tag, ...Object.fromEntries(RULES.keys.map(k => [k, CFG[k]])) }),
   // The skin and the surge rules, reachable from the console: this is the
   // handle a balance pass or a look pass actually works through.
   THREE, scene, renderer, tableMesh, Theme, THEMES, SKIN, COLORS, HUE,
