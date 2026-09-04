@@ -755,8 +755,8 @@ const CFG = {
   // builder's ration does not climb with them it is answering a siege that
   // roughly triples in size with the same four blocks it started with, and the
   // match is decided by the curve rather than by either side's play.
-  piecesRampEvery: 3,       // +1 placement every this many rounds
-  piecesMax: 7,             // ... up to this many
+  piecesRampEvery: 4,       // +1 placement every this many rounds
+  piecesMax: 6,             // ... up to this many
   attackGap: 0.75,          // pause between consecutive attacks
   settleTime: 3.2,          // max wait for the tower to stop moving
   summaryTime: 2.4,
@@ -772,11 +772,12 @@ const CFG = {
   // decided before either side plays. At 0.96/0.25 the builder was aiming at a
   // four-point window while the saboteur had seventy-five points to land in,
   // and everything in between was a null round that only the saboteur's growing
-  // budget benefited from.
-  flawlessRatio: 0.85,      // keep this much height through a siege -> Ward, and the saboteur loses patience
+  // budget benefited from. 0.85/0.35 overshot the other way, so these sit
+  // between the two: a ten-point window, which is tight but reachable.
+  flawlessRatio: 0.90,      // keep this much height through a siege -> Ward, and the saboteur loses patience
   struts: 3,                // builder's structural integrity; hits zero -> saboteur wins
   patience: 4,              // saboteur's patience; a flawless round costs one
-  damageLoss: 0.35,         // lose this share of your height in one siege -> -1 strut
+  damageLoss: 0.30,         // lose this share of your height in one siege -> -1 strut
   severeLoss: 0.60,         // ... a rout costs two
   // A tower flattened to nothing takes an automatic strut, which on its own is
   // an unrecoverable spiral: too short to rebuild past the floor, so the next
@@ -787,7 +788,7 @@ const CFG = {
   planTime: 30,             // saboteur's placement phase
   aiBuildStep: 1.5,         // seconds between AI builder placements
   energyBase: 6,            // saboteur energy = base + 1.5/round, capped
-  energyMax: 10,            // 5 attacks at the cheap end, not 7
+  energyMax: 12,            // 6 attacks at the cheap end, not 7
   // Wards used to be earned only on a flawless round, which gated the builder's
   // one defensive resource behind the exact outcome it exists to produce: if
   // you were behind you could never obtain the thing that stops you being
@@ -798,20 +799,26 @@ const CFG = {
   // answer with. Both sides know it is coming, which is the point — it gives
   // the match a rhythm to build towards instead of a flat grind.
   surgeEvery: 5,
-  surgePower: 1.6,          // how much harder an empowered attack lands
+  surgePower: 1.7,          // how much harder an empowered attack lands
   surgeCost: 2,             // what the empowered form adds to a tool's price
   // Empowered tools, harder hits and a bigger budget was three buffs against
   // the builder's one Keystone. The empowerment is the surge; the budget only
-  // has to cover the surcharge.
-  surgeEnergy: 2,           // extra budget that round, or nothing is affordable
+  // has to cover the surcharge, which at +2 a tool is what this pays for.
+  surgeEnergy: 3,           // extra budget that round, or nothing is affordable
   keystoneGrant: 1,         // super anchors handed out per surge round
   maxKeystones: 2,
   // Global dial on how hard every attack lands, and how fast that climbs with
   // the round. Kept here rather than in the five make* functions so the tools
   // stay balanced against each other while the whole siege is tuned.
-  attackPower: 0.85,        // flat multiplier on every attack's magnitude
-  powerRamp: 0.05,          // added per round past the first
-  powerMax: 1.5,            // ceiling on the ramp, before attackPower
+  //
+  // Back to 1.0: knocking 15% off every attack was piled on top of the fixes
+  // that actually mattered (the win-condition windows, the builder's growing
+  // ration, the Ward flow) and turned out to be the one nerf the game did not
+  // need. The tools hit as hard as they always did; what changed is how much
+  // the builder gets to answer with.
+  attackPower: 1.0,         // flat multiplier on every attack's magnitude
+  powerRamp: 0.07,          // added per round past the first
+  powerMax: 1.7,            // ceiling on the ramp, before attackPower
 };
 
 // =====================================================================
@@ -828,7 +835,10 @@ const CFG = {
 //  build clock or a colour should not orphan the record.
 // =====================================================================
 const RULES = (() => {
-  const ID = '2.0';
+  // 2.0 fixed the structure and overshot: builder 75%. 2.1 hands the magnitude
+  // back to the saboteur and makes the ration Ward a catch-up rather than a
+  // second reward for already winning.
+  const ID = '2.1';
   const KEYS = [
     'flawlessRatio', 'damageLoss', 'severeLoss', 'struts', 'patience', 'razeGrace',
     'energyBase', 'energyMax', 'attackPower', 'powerRamp', 'powerMax',
@@ -4563,10 +4573,17 @@ function finishRound() {
     G.patience--;
     if (hit) grantWard();
   }
-  // The ration Ward, independent of how the round went. This is the one that
-  // makes a losing position playable: the flawless Ward above only ever arrived
-  // in rounds that did not need it.
-  if (G.round % CFG.wardEvery === 0) grantWard();
+  // The ration Ward, and only into an empty pocket. The flawless Ward above is
+  // the reward for a good round; this one is the floor under a bad run, so a
+  // builder who has spent everything is not left with no answer at all.
+  //
+  // Handing it out unconditionally, which is what the first pass did, inverts
+  // the original problem rather than fixing it: a builder who is holding well
+  // earns flawless Wards *and* draws rations on top, so the side already ahead
+  // accumulates the defence fastest. Gating on an empty pocket makes it a pure
+  // catch-up: it can never stack with success, and it costs the builder who is
+  // winning nothing, because they were never going to be empty.
+  if (G.round % CFG.wardEvery === 0 && G.wards === 0) grantWard();
   if (G.round % 2 === 0) G.anchors = Math.min(CFG.maxAnchors, G.anchors + 1);
 
   const lostMetres = Math.max(0, G.heightBefore - after);
