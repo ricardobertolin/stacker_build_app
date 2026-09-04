@@ -2,8 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- viewport-fit=cover is what makes env(safe-area-inset-*) report anything.
+     The phone layout is already written against those insets, so without it an
+     installed copy runs its score panel under the notch. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Tower Siege — Builder vs Saboteur</title>
+<meta name="description" content="Stack a tower under real physics while the other side spends a budget trying to bring it down. Builder vs Saboteur, in the browser." />
+
+<!-- Installed on a phone this is a game and not a page: no browser chrome, no
+     status bar fighting the score panel, and it opens with no connection once
+     it has been opened with one. theme-color is rewritten by Theme.apply so
+     the shell matches whichever skin is up. -->
+<link rel="manifest" href="./manifest.webmanifest" />
+<meta name="theme-color" content="#17120d" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Tower Siege" />
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="./icon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Karla:wght@400;500;700&family=Archivo+Black&family=Archivo+Narrow:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet" />
@@ -554,6 +573,7 @@
     <button class="spd" data-spd="2">2&times;</button>
     <button class="spd" data-spd="4">4&times;</button>
     <button class="spd" data-spd="8">8&times;</button>
+    <button class="spd" data-spd="16">16&times;</button>
   </span>
   <button class="b sec" id="pauseBtn" title="Pause (P)">⏸</button>
   <button class="b sec" id="muteBtn" title="Mute (M)">🔊</button>
@@ -644,6 +664,7 @@
   <div id="startRoot">
     <button class="play" id="playBtn">Play</button>
     <button class="mi" id="optsBtn">Training options</button>
+    <button class="mi" id="installBtn" hidden>Install on this device</button>
   </div>
 
   <div class="modes">
@@ -686,7 +707,7 @@
       <h2>Watch them train</h2>
       <p>Both sides are played by the AI. After every match each side keeps whichever of its weights scored better, so the builder and the saboteur sharpen each other match after match.</p>
       <ul>
-        <li>Runs matches back to back at up to 8&times;</li>
+        <li>Runs matches back to back at up to 16&times;</li>
         <li>Progress is saved in this browser</li>
         <li id="cW3">What it learns is what you play against</li>
       </ul>
@@ -724,6 +745,44 @@
 <!-- Scanlines, drafting grid or vignette, depending on the skin. Pure paint:
      it sits over everything and catches no clicks. -->
 <div id="crt"></div>
+
+<!-- Installing. Deliberately a plain script and not part of the module: if the
+     CDN is unreachable the game does not start, and that is exactly the moment
+     the offline copy has to already be registered. -->
+<script>
+(function () {
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  }
+
+  const btn = document.getElementById('installBtn');
+  const installed = matchMedia('(display-mode: standalone)').matches
+                 || matchMedia('(display-mode: fullscreen)').matches
+                 || navigator.standalone === true;
+  let deferred = null;
+
+  // Chrome and Edge hand you the prompt and let you fire it whenever.
+  addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferred = e;
+    if (!installed) btn.hidden = false;
+  });
+  addEventListener('appinstalled', () => { deferred = null; btn.hidden = true; });
+
+  // iOS has no such event and no API behind it, so the button can only say
+  // where the menu item lives.
+  const ua = navigator.userAgent;
+  const ios = /iPad|iPhone|iPod/.test(ua)
+           || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (ios && !installed) { btn.hidden = false; btn.textContent = 'Add to Home Screen'; }
+
+  btn.onclick = () => {
+    if (deferred) { const p = deferred; deferred = null; btn.hidden = true; p.prompt(); return; }
+    btn.textContent = 'Share  ›  Add to Home Screen';
+    btn.disabled = true;
+  };
+})();
+</script>
 
 <script type="importmap">
 {
@@ -1064,6 +1123,11 @@ const Theme = (() => {
     const root = document.documentElement.style;
     for (const k in T.css) root.setProperty('--' + k, T.css[k]);
     document.body.dataset.theme = name;
+    // Installed on a phone the system paints the bars around the game with
+    // this, so a skin that does not move it leaves a foundry-brown frame around
+    // the blueprint.
+    const tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute('content', T.css.bg);
     const tagEl = document.getElementById('startTag');
     if (tagEl) tagEl.textContent = `${T.tag}  ·  Builder vs Saboteur`;
     for (const b of document.querySelectorAll('.thm')) b.classList.toggle('on', b.dataset.theme === name);
@@ -4664,6 +4728,11 @@ function gameOver(reason) {
   document.getElementById('overRounds').textContent = G.round;
   document.getElementById('overPeak').textContent = G.peak.toFixed(1);
   document.getElementById('overAtk').textContent = G.attacksWeathered;
+  // Play again is only offered when something is actually waiting on it. With
+  // auto-restart on, or in self-play, the next match deals itself in about a
+  // second, and a button that disappears out from under the cursor is only
+  // there to be pressed by accident.
+  document.getElementById('againBtn').hidden = G.mode === MODE.AUTO || TR.get('again');
   document.getElementById('over').classList.add('show');
   if (isHost() && NET.ready) netSend({ t: 'over', r: reason });
 
@@ -5971,6 +6040,10 @@ function autoAgainTick(dt) {
 //  Main loop
 // =====================================================================
 const fixed = 1 / 60;
+// How long one frame is allowed to spend inside the self-play physics loop
+// before it gives the rest of the frame back to the browser. Only 16x can
+// reach it on anything modern.
+const AUTO_BUDGET = 22;   // ms
 let last = performance.now();
 let shake = 0;
 const shakeVec = new THREE.Vector3();
@@ -6119,7 +6192,7 @@ function animate(now) {
   // a fast one, and at any speed setting, which is the whole point of seeding
   // the dice. Human play still rides real time, where smoothness matters more.
   const ticks = auto ? Math.max(1, Math.round(G.speed)) : 0;
-  const dt = auto ? ticks * fixed : real;
+  let dt = auto ? ticks * fixed : real;
 
   // Paused freezes the physics and the turn clock but keeps the camera live,
   // so you can still look the tower over while you think.
@@ -6133,11 +6206,22 @@ function animate(now) {
 
   if (sim) {
     if (auto) {
+      // Above 8x a frame can be asked for more physics than it has time for.
+      // The loop drops the rest of the frame's ticks rather than locking the
+      // tab up: the tick sequence is untouched, so the match still plays out
+      // exactly the same, it just advances slower than the number on the
+      // button. The guard only starts counting past the eighth tick, so every
+      // speed that existed before this runs its full quota as it always did.
+      const until = performance.now() + AUTO_BUDGET;
+      let ran = 0;
       for (let i = 0; i < ticks; i++) {
         world.step(fixed);          // exactly one internal step, no accumulator
         simBookkeeping(fixed);
         stepPhase(fixed);
+        ran++;
+        if (i >= 7 && performance.now() > until) break;
       }
+      dt = ran * fixed;             // the effects clock follows what actually ran
     } else {
       world.step(fixed, dt, 5);
       simBookkeeping(dt);
