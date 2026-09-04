@@ -74,7 +74,8 @@ the ones you play against in solo. Above 8x a frame can be asked for more
 physics than it has time for, so the loop gives the rest of the frame back
 rather than locking the tab: the tick sequence is unchanged and the match plays
 out identically, it just advances a little slower than the number on the button
-when the machine cannot keep up.
+when the machine cannot keep up. On a phone the training readout folds down to
+the four numbers that move, and tapping its header opens the rest.
 
 ## Controls
 
