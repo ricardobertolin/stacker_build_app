@@ -20,7 +20,7 @@ and spend it on attacks, aiming each one at the tower. Every attack placed shows
 up as a marker in the world and a card in the queue.
 
 The **builder** then gets a build phase with a clock and a fixed ration of pieces
-(6 in round one, 4 after that, climbing back to 6 as the rounds pass). The siege
+(7 in round one, 5 after that, climbing back to 7 as the rounds pass). The siege
 queue is already on screen. Anchors bolt a piece to whatever it lands on. Wards
 cancel a queued attack outright, spent by clicking its card. Swaps cycle the
 piece in hand.
@@ -28,11 +28,24 @@ piece in hand.
 Then the siege runs, one attack at a time, and whatever is left standing is
 measured against what was there before.
 
-Losing 30% of your height in one siege costs a strut, 60% costs two, and a tower
-flattened to nothing costs one automatically after a round's grace. Three struts
+Between rounds the site is cleared. A block is hauled away if the siege moved
+it, it is lying on the table rather than on the structure, and nothing is
+resting on it. All three have to be true: a foundation you laid flat and have
+not built on yet is not wreckage, and a base block that got shoved but is still
+carrying the tower is not wreckage either. What is left is what held. The other
+half of that deal is bedding: a block that comes through a whole siege without
+moving grips harder afterwards than one dropped a second ago, so a structure
+that has stood is worth more than the same blocks in a pile.
+
+Losing 38% of your height in one siege costs a strut, 72% costs two, and a tower
+flattened to nothing costs one automatically after a round's grace. Four struts
 gone and the saboteur wins. Coming through a siege with 90% of your height intact
-is a clean round: it earns a Ward and costs the saboteur one of four patience.
+is a clean round: it earns a Ward and costs the saboteur one of three patience.
 Run the saboteur out of patience and the tower wins.
+
+Anything the crew hauls off the site comes back as material. Every second block
+cleared is an extra placement next round, up to two, which pays out exactly when
+the tower has just come down and pays nothing on a clean round.
 
 Every fifth round is a **surge**. The saboteur's whole kit comes out in its
 empowered form at a surcharge, and the builder is handed a Keystone, an anchor
@@ -122,6 +135,37 @@ numbers are meant to say something about the game rather than about the
 optimiser, since a win rate taken while both sides are mutating is partly an
 artefact of two hill climbers chasing each other and can sit at a contented 50%
 on top of a badly unfair ruleset.
+
+`Tele.begin('some label')` from the console starts a measurement pass: it
+freezes the champions, empties the ledger and rewinds the dice, so two passes
+either side of a rules change play the same matches with the same players and
+differ only by the change. `Tele.report()` prints what happened. That is how the
+wreckage rule was checked in: 30 matches before, the same 30 after, builder win
+rate 16.7% both times, with blocks standing at the end of a round falling from a
+carpet of 28 by round eight to a steady 8.
+
+It is also what the builder pass was decided on, since 16.7% was too low to
+leave alone. Six variants over the same seeds, frozen champions:
+
+| variant | builder wins | rounds per match |
+| --- | --- | --- |
+| 2.1, before any of this | 16.7% | 4.2 |
+| 3.0, wreckage cleared | 16.7% | 4.1 |
+| salvage only | 5% | 4.3 |
+| more pieces | 20% | 4.2 |
+| slower clocks | 30% | 5.1 |
+| clocks + pieces | 35% | 4.8 |
+| clocks + pieces + a fourth strut | 45% | 5.5 |
+| clocks + pieces + patience 2 | 55% | 3.8 |
+| **3.1 as shipped, over 30** | **53.3%** | **5.7** |
+
+The fourth-strut row is the one that shipped. Patience 2 got to an even win rate
+by ending matches sooner, which is the wrong way to buy it.
+
+Salvage on its own does nothing measurable: it pays out after a collapse, and
+before the pass a collapse was already the end of the match. It is in the 45%
+because it is in the build, and it matters more now that a match survives the
+collapse it fires on.
 
 Records are filed under a ruleset tag: a hand-set version plus a hash of the
 balance numbers a win rate actually depends on. Tightening a number and

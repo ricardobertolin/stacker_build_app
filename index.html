@@ -246,6 +246,17 @@
   .thm:hover { color: var(--ink); border-color: var(--accent); }
   .thm.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
+  /* --- the line at the bottom of the menu: whose game this is, and which one --- */
+  #colophon { display: none; margin-top: 18px; font-size: 10.5px; letter-spacing: .3px; color: var(--mute); text-align: center; }
+  #start[data-view="root"] #colophon { display: block; }
+  #colophon a { color: var(--dim); text-decoration: none; border-bottom: 1px solid var(--line); pointer-events: auto; }
+  #colophon a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  #colophon .v { font-variant-numeric: tabular-nums; }
+  /* The ruleset is the version that decides how a match plays, so it is worth
+     as much as the app version next to it, and a balance report can be read
+     against the build that produced it. */
+  #colophon .r { color: var(--mute); opacity: .8; }
+
   /* --- lobby: hosting a link, or joining one --- */
   #lobby { flex-direction: column; align-items: center; width: 470px; max-width: calc(100vw - 40px);
            padding: 22px 24px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
@@ -794,6 +805,11 @@
   </div>
 
   <div id="themeRow"><span class="lb">Look</span></div>
+
+  <div id="colophon">
+    <span class="v" id="verLine">v—</span>
+    &nbsp;·&nbsp; made by <a href="https://github.com/ricardobertolin" target="_blank" rel="noopener">ricardobertolin</a>
+  </div>
 </div>
 
 <!-- Scanlines, drafting grid or vignette, depending on the skin. Pure paint:
@@ -860,16 +876,21 @@ import * as CANNON from 'cannon-es';
 
 // ---------- Tunables ----------
 const CFG = {
-  buildTimeFirst: 26,       // seconds of the opening build phase
-  buildTime: 19,            // every later build phase
-  piecesFirst: 6,           // placements allowed in round 1
-  piecesPerRound: 4,        // placements allowed after that
+  // The clock only ever binds for a human: the AI builder places on a 1.5s
+  // step and is done long before time is up, so these are outside the ruleset
+  // hash and a change here does not orphan a balance record. They went up with
+  // the piece ration — seven placements in the time that used to hold six is
+  // not more generous, it is the same rush.
+  buildTimeFirst: 31,       // seconds of the opening build phase
+  buildTime: 23,            // every later build phase
+  piecesFirst: 7,           // placements allowed in round 1
+  piecesPerRound: 5,        // placements allowed after that
   // The saboteur's budget and its damage both climb with the round. If the
   // builder's ration does not climb with them it is answering a siege that
   // roughly triples in size with the same four blocks it started with, and the
   // match is decided by the curve rather than by either side's play.
   piecesRampEvery: 4,       // +1 placement every this many rounds
-  piecesMax: 6,             // ... up to this many
+  piecesMax: 7,             // ... up to this many
   attackGap: 0.75,          // pause between consecutive attacks
   settleTime: 3.2,          // max wait for the tower to stop moving
   summaryTime: 2.4,
@@ -887,11 +908,21 @@ const CFG = {
   // and everything in between was a null round that only the saboteur's growing
   // budget benefited from. 0.85/0.35 overshot the other way, so these sit
   // between the two: a ten-point window, which is tight but reachable.
+  //
+  // Both clocks were then measured rather than argued about, and the builder
+  // was losing five matches in six. The reason was the rate, not the window:
+  // struts came off at about 0.7 a round against a hold rate of 0.31, so the
+  // losing clock ran three times as fast as the winning one and the builder was
+  // dead in four rounds while needing thirteen to win. These numbers are the
+  // ones that closed it — one more strut to absorb a bad round, one less clean
+  // round to convince the saboteur, and a wider band before a round is scored
+  // as damage at all. 16.7% -> 45% over the same 20 seeded matches, and matches
+  // that run 5.5 rounds instead of 4.2.
   flawlessRatio: 0.90,      // keep this much height through a siege -> Ward, and the saboteur loses patience
-  struts: 3,                // builder's structural integrity; hits zero -> saboteur wins
-  patience: 4,              // saboteur's patience; a flawless round costs one
-  damageLoss: 0.30,         // lose this share of your height in one siege -> -1 strut
-  severeLoss: 0.60,         // ... a rout costs two
+  struts: 4,                // builder's structural integrity; hits zero -> saboteur wins
+  patience: 3,              // saboteur's patience; a flawless round costs one
+  damageLoss: 0.38,         // lose this share of your height in one siege -> -1 strut
+  severeLoss: 0.72,         // ... a rout costs two
   // A tower flattened to nothing takes an automatic strut, which on its own is
   // an unrecoverable spiral: too short to rebuild past the floor, so the next
   // round takes another one and the match is over with no counterplay left.
@@ -932,7 +963,44 @@ const CFG = {
   attackPower: 1.0,         // flat multiplier on every attack's magnitude
   powerRamp: 0.07,          // added per round past the first
   powerMax: 1.7,            // ceiling on the ramp, before attackPower
+
+  // Wreckage and bedding.
+  //
+  // Nothing used to leave the table except what fell off the edge, so a match
+  // silted up: by round eight there were 28 blocks on the table holding up a
+  // 2.1m tower whose peak had been 5.5m in round four. Four fifths of them were
+  // still sitting flat and axis-aligned, so it was not that rubble propped the
+  // height up — it was that a knocked-out block is a perfectly good landing pad,
+  // and the builder stopped going up and started spreading sideways across its
+  // own wreckage. The game became about the debris field.
+  //
+  // So the site is cleared between rounds: anything the siege knocked loose
+  // that is not now holding something up gets hauled away. What is left is what
+  // held. That is a straight buff to the saboteur — damage stops being a thing
+  // you can build back on top of — so the other half pays it back. A block that
+  // comes through a whole siege without moving is bedded in and grips harder
+  // than one dropped a second ago, which makes a structure that has stood
+  // genuinely better than a fresh pile of the same blocks.
+  // Salvage. What the crew hauls off is not thrown away, it is brought back as
+  // material: every second block cleared is an extra placement next round, up
+  // to a cap. It pays out exactly when the tower has just come down, which is
+  // the moment the match is least recoverable, and pays nothing on a clean
+  // round, when the builder has nothing to recover from.
+  salvagePer: 2,            // blocks hauled off per extra placement
+  salvageMax: 2,            // ... and the most a round can hand back. 0 turns it off
+
+  clearWreck: 1,            // 0 puts the old silting-up behaviour back
+  wreckMove: 0.45,          // metres a block must have shifted to count as knocked loose
+  wreckTilt: 18,            // ... or degrees it must have tipped
+  beddedFriction: 1.55,     // multiplier on a bedded block's grip, capped below 1
+  beddedDamping: 0.06,      // and how much a nudge is absorbed rather than passed on
 };
+
+// The build. Middle number for a feature, last for a fix. The ruleset tag shown
+// next to it in the menu is a different version on a different clock: it names
+// the balance, and a win rate only means anything against the one that produced
+// it, so both are worth having on screen.
+const VERSION = '1.0.0';
 
 // =====================================================================
 //  Ruleset version
@@ -950,14 +1018,19 @@ const CFG = {
 const RULES = (() => {
   // 2.0 fixed the structure and overshot: builder 75%. 2.1 hands the magnitude
   // back to the saboteur and makes the ration Ward a catch-up rather than a
-  // second reward for already winning.
-  const ID = '2.1';
+  // second reward for already winning. 3.0 stops the table silting up: the
+  // wreckage is cleared between rounds and what stood through a siege beds in.
+  // 3.1 is the builder pass 3.0 measured the need for: it was losing five in
+  // six, on 2.1 as much as on 3.0, and now takes 45%.
+  const ID = '3.1';
   const KEYS = [
     'flawlessRatio', 'damageLoss', 'severeLoss', 'struts', 'patience', 'razeGrace',
     'energyBase', 'energyMax', 'attackPower', 'powerRamp', 'powerMax',
     'surgeEvery', 'surgePower', 'surgeCost', 'surgeEnergy', 'keystoneGrant', 'maxKeystones',
     'piecesFirst', 'piecesPerRound', 'piecesRampEvery', 'piecesMax',
     'wardEvery', 'maxWards', 'startAnchors', 'maxAnchors', 'swapsFirst', 'swapsPerRound',
+    'clearWreck', 'wreckMove', 'wreckTilt', 'beddedFriction', 'beddedDamping',
+    'salvagePer', 'salvageMax',
   ];
   // FNV-1a. Short, stable across reloads, and no dependency.
   const body = KEYS.map(k => `${k}=${CFG[k]}`).join(';');
@@ -1589,7 +1662,8 @@ const Tele = (() => {
     endRound: {},              // histogram of the round a match ended on
     tools: {},
     round: { held: 0, grazed: 0, damaged: 0, severe: 0, razed: 0, unopposed: 0,
-             metres: 0, killed: 0, energyLeft: 0, surge: 0 },
+             metres: 0, killed: 0, energyLeft: 0, surge: 0,
+             hauled: 0, bedded: 0, standing: 0 },
     bld: { placed: 0, anchored: 0, keystones: 0, swaps: 0, pieces: {},
            wardsEarned: 0, wardsCapped: 0, wardsSpent: 0 },
   });
@@ -1643,6 +1717,9 @@ const Tele = (() => {
       const R = s.round;
       R.metres += r.lost;
       R.killed += r.killed;
+      R.hauled += r.hauled || 0;
+      R.bedded += r.bedded || 0;
+      R.standing += r.standing || 0;
       if (r.razed) R.razed++;
       else if (r.dmg >= 2) R.severe++;
       else if (r.dmg === 1) R.damaged++;
@@ -1820,6 +1897,11 @@ const Tele = (() => {
       L.push(`held(flawless) ${pc(R.held / n)}   grazed ${pc(R.grazed / n)}   -1 strut ${pc(R.damaged / n)}   -2 struts ${pc(R.severe / n)}   razed ${pc(R.razed / n)}`);
       L.push(`no attack landed ${pc(R.unopposed / n)}   metres lost/round ${(R.metres / n).toFixed(2)}`
            + `   blocks lost/round ${(R.killed / n).toFixed(2)}   energy unspent/round ${(R.energyLeft / n).toFixed(2)}`);
+      // What the table looks like over a match: how many blocks are standing at
+      // the end of a round, how many the siege knocked loose and the crew took
+      // away, and how many have stood long enough to bed in.
+      L.push(`blocks standing/round ${(R.standing / n).toFixed(1)}   hauled off/round ${(R.hauled / n).toFixed(2)}`
+           + `   bedded in/round ${(R.bedded / n).toFixed(2)}`);
       L.push(`surge rounds ${R.surge} of ${s.rounds}`);
       L.push('');
       const b = s.bld;
@@ -2071,6 +2153,19 @@ world.addContactMaterial(new CANNON.ContactMaterial(slickMat, blockMat,  { frict
 world.addContactMaterial(new CANNON.ContactMaterial(slickMat, groundMat, { friction: 0.03, restitution: 0.02 }));
 world.addContactMaterial(new CANNON.ContactMaterial(slickMat, slickMat,  { friction: 0.01, restitution: 0.02 }));
 
+// A block that has come through a whole siege without moving is bedded in: the
+// same block, gripping harder than one that was dropped a second ago. It is the
+// counterweight to clearing the wreckage — a structure that has stood is worth
+// more than the pile of blocks it is made of, which is the thing the game was
+// missing when a knocked-out block was as good a foundation as a placed one.
+const beddedMat = new CANNON.Material('bedded');
+const bedGrip = f => Math.min(0.95, f * CFG.beddedFriction);
+world.addContactMaterial(new CANNON.ContactMaterial(groundMat, beddedMat, { friction: bedGrip(0.62), restitution: 0.03 }));
+world.addContactMaterial(new CANNON.ContactMaterial(blockMat,  beddedMat, { friction: bedGrip(0.56), restitution: 0.02 }));
+world.addContactMaterial(new CANNON.ContactMaterial(beddedMat, beddedMat, { friction: bedGrip(0.56), restitution: 0.02 }));
+// Oil under a settled block is exactly what grease is for, so it still wins.
+world.addContactMaterial(new CANNON.ContactMaterial(slickMat, beddedMat,  { friction: 0.02, restitution: 0.02 }));
+
 // Sustained forces.
 // cannon clears every accumulated force at the end of each *internal* step, and
 // one call to world.step can run many of them. So a force applied once per
@@ -2251,6 +2346,19 @@ const Snd = (() => {
       const g = c.createGain(); env(g, t, 0.001, 0.09, 0.3);
       n.connect(f).connect(g).connect(master); n.start(t); n.stop(t + 0.12);
       osc(c, 'sawtooth', 900, 260, t, 0.002, 0.10, 0.12);
+    },
+
+    dust() {                        // wreckage hauled off the table
+      const c = on(); if (!c) return;
+      const t = now();
+      const n = noiseSrc(c);
+      // Sweeping the band downward is what makes it read as gravel being
+      // dragged away rather than as another impact.
+      const f = band(c, 'bandpass', 1400, 1.1);
+      f.frequency.exponentialRampToValueAtTime(320, t + 0.42);
+      const g = c.createGain(); env(g, t, 0.03, 0.44, 0.16);
+      n.connect(f).connect(g).connect(master); n.start(t); n.stop(t + 0.5);
+      osc(c, 'sine', 150, 70, t, 0.02, 0.34, 0.09);
     },
 
     // --- attacks ---
@@ -2513,6 +2621,7 @@ const G = {
   heightNow: 0,
   heightBefore: 0,
   piecesLeft: 0,
+  salvage: 0,       // extra placements owed to the builder for last round's wreckage
   swaps: 0,         // piece changes left this round — you build with what you are dealt
   anchors: CFG.startAnchors,
   wards: 0,
@@ -3021,10 +3130,17 @@ function breakAnchor(blk) {
   });
 }
 
+// Raised while the crew is clearing the site. The round is scored by the time
+// that happens, but the telemetry is not: without this, every block hauled off
+// is filed as a block the saboteur destroyed, and "blocks lost per round" —
+// which is one of the two numbers a tool's cost is argued from — reads about
+// twice what the siege actually did.
+let hauling = false;
+
 function removeBlock(blk) {
   if (!blk.alive) return;
   blk.alive = false;
-  if (G.phase === PHASE.SIEGE || G.phase === PHASE.SETTLE) G.destroyedThisRound++;
+  if (!hauling && (G.phase === PHASE.SIEGE || G.phase === PHASE.SETTLE)) G.destroyedThisRound++;
   if (blk.constraint) { world.removeConstraint(blk.constraint); blk.constraint = null; }
   if (blk.welds) { for (const w of blk.welds) world.removeConstraint(w); blk.welds = null; }
   if (blk.helper) { scene.remove(blk.helper); blk.helper = null; }
@@ -3061,6 +3177,130 @@ function measureHeight(settledOnly = true) {
 }
 
 function liveBlocks() { return blocks.filter(b => b.alive && b.body.position.y > -1); }
+
+// =====================================================================
+//  Wreckage and bedding
+//  Everything here keys off one question: is this block still where it was put?
+//  The pose every block is judged against is taken when the siege starts, so a
+//  piece that shuffled a centimetre while the builder was working is not
+//  branded as debris, and a piece placed this round is judged on this round's
+//  siege like any other.
+// =====================================================================
+function markPose(b) {
+  b.homePos = b.body.position.clone();
+  b.homeQuat = b.body.quaternion.clone();
+}
+
+function poseAllBlocks() {
+  for (const b of blocks) {
+    if (!b.alive) continue;
+    // A piece dropped in the last second of the build phase is still in the
+    // air. Judging it against a mid-flight pose would have the crew haul away a
+    // block whose only crime was landing, so it sits this round out and gets a
+    // pose at the start of the next one.
+    if (isSettled(b)) markPose(b);
+    else { b.homePos = null; b.homeQuat = null; }
+  }
+}
+
+// Moved, in either sense: carried off its spot, or tipped where it stands.
+function shifted(b) {
+  if (!b.homePos) return false;         // never went through a siege, so nothing moved it
+  const p = b.body.position, h = b.homePos;
+  if (Math.hypot(p.x - h.x, p.y - h.y, p.z - h.z) > CFG.wreckMove) return true;
+  // Angle between two quaternions: their dot is cos(half the angle between).
+  const q = b.body.quaternion, g = b.homeQuat;
+  const dot = Math.min(1, Math.abs(q.x * g.x + q.y * g.y + q.z * g.z + q.w * g.w));
+  return 2 * Math.acos(dot) * 180 / Math.PI > CFG.wreckTilt;
+}
+
+// Is anything resting on this block? Boxes rather than contacts: a block that
+// has just been shoved may not be touching this frame and would still be held
+// up a frame later, and the answer has to be the same every time it is asked or
+// self-play stops replaying.
+function carriesLoad(b, pool, boxes) {
+  const box = boxes.get(b);
+  for (const o of pool) {
+    if (o === b) continue;
+    const ob = boxes.get(o);
+    if (ob.min.y < box.max.y - 0.3 || ob.min.y > box.max.y + 0.35) continue;
+    if (ob.max.x < box.min.x || ob.min.x > box.max.x) continue;
+    if (ob.max.z < box.min.z || ob.min.z > box.max.z) continue;
+    return true;
+  }
+  return false;
+}
+
+// The mesh leaves as something you can watch go, rather than blinking out. The
+// body is gone the moment this is called, so nothing here is load-bearing.
+function haulAway(blk) {
+  const mesh = blk.mesh;
+  removeBlock(blk);
+  scene.add(mesh);
+  const mats = [];
+  mesh.traverse(o => {
+    if (!o.material) return;
+    o.material = o.material.clone();
+    o.material.transparent = true;
+    mats.push(o.material);
+  });
+  let t = 0;
+  fx.push({ obj: mesh, update(dt) {
+    t += dt;
+    const k = Math.min(1, t / 0.5);
+    mesh.position.y -= dt * 1.1;
+    for (const m of mats) m.opacity = 1 - k;
+    return k < 1;
+  }});
+}
+
+// The site is cleared between rounds. Three things have to be true of a block
+// before the crew takes it: the siege moved it, it is lying on the table rather
+// than on the structure, and nothing is resting on it.
+//
+// All three matter. Without "moved", a foundation the builder deliberately laid
+// flat and has not built on yet gets thrown away. Without "on the table", a
+// quake that nudges the whole tower half a metre eats it a course at a time
+// from the top down — every course carries nothing once the one above it is
+// gone. Without "carries nothing", the crew pulls a block out from under a
+// tower that is standing on it. What is left is what held.
+function clearWreckage() {
+  if (!CFG.clearWreck) return 0;
+  const floor = tableBody.position.y + 0.2 + 0.15;
+  let hauled = 0;
+  // A pass can only ever expose more wreckage, never create a floater: nothing
+  // holding anything up is taken. Two passes is already more than it needs.
+  for (let pass = 0; pass < 4; pass++) {
+    const live = liveBlocks();
+    const boxes = new Map();
+    for (const b of live) boxes.set(b, new THREE.Box3().setFromObject(b.mesh));
+    const doomed = live.filter(b => !b.anchored && !b.pendingAnchor && !b.keystone
+                                 && shifted(b) && boxes.get(b).min.y < floor
+                                 && !carriesLoad(b, live, boxes));
+    if (!doomed.length) break;
+    hauling = true;
+    for (const b of doomed) { haulAway(b); hauled++; }
+    hauling = false;
+  }
+  if (hauled) { Snd.dust(); wakeAll(); }
+  return hauled;
+}
+
+// The other half of the deal. Only blocks that were actually tested get it:
+// standing through a round nobody attacked is not the same as standing.
+function bedIn() {
+  let n = 0;
+  for (const b of blocks) {
+    if (!b.alive || b.bedded || b.greased || !b.homePos) continue;
+    if (b.body.position.y < -1 || shifted(b)) continue;
+    b.bedded = true;
+    b.body.material = beddedMat;
+    b.body.linearDamping = CFG.beddedDamping;
+    b.body.angularDamping = CFG.beddedDamping;
+    n++;
+  }
+  return n;
+}
 
 function centerOfMass(minY = -99) {
   let mx = 0, mz = 0, m = 0;
@@ -4452,7 +4692,9 @@ function startRound() {
   // Resolve anchors that were still pending, then clear last round's wreckage.
   for (const b of blocks) if (b.pendingAnchor) tryApplyAnchor(b, true);
   clearRoundHazards();
-  G.piecesLeft = G.round === 1 ? CFG.piecesFirst : roundPieces(G.round);
+  G.piecesLeft = (G.round === 1 ? CFG.piecesFirst : roundPieces(G.round)) + G.salvage;
+  const salvaged = G.salvage;
+  G.salvage = 0;
   G.swaps = G.round === 1 ? CFG.swapsFirst : CFG.swapsPerRound;   // swaps do not carry over
   G.atkIndex = -1;
   G.destroyedThisRound = 0;
@@ -4480,6 +4722,8 @@ function startRound() {
     toast('SURGE ROUND', buildLocal()
       ? `Every tool comes empowered. You hold ${G.keystones} Keystone${G.keystones === 1 ? '' : 's'} — H to arm.`
       : 'Your whole kit is empowered this round, at a higher price.', 2.4);
+  } else if (salvaged && buildLocal()) {
+    toast('SALVAGE', `The crew got ${salvaged} piece${salvaged === 1 ? '' : 's'} back out of the wreckage.`, 2.0);
   }
 }
 
@@ -4573,6 +4817,9 @@ function startSiege() {
   clearPreview();
   clearTelegraphs();
   for (const b of blocks) if (b.pendingAnchor) tryApplyAnchor(b, true);
+  // The pose every block is judged against for the rest of this round. Taken
+  // here, so "moved" means moved by the siege and by nothing else.
+  poseAllBlocks();
   G.heightBefore = measureHeight();
   Tele.queued(G.queue);          // charged before the warded ones are dropped
   G.queue = G.queue.filter(a => !a.warded);
@@ -4714,15 +4961,28 @@ function finishRound() {
   G.scoreS += gainS;
   G.totalLost += lostMetres;
   G.totalDestroyed += G.destroyedThisRound;
-  // The charges are reconciled by now, so this is the damage the round was
-  // actually judged on rather than the mid-siege overshoot.
-  Tele.round({ dmg, held, razed, hit, lost: lostMetres, killed: G.destroyedThisRound, queue: G.queue });
-  const gained = (G.mode === MODE.AUTO || isBuilder()) ? gainB : gainS;
-  updateHUD();
-
   // Struts are checked first: a round that both flattens the tower and would
   // have exhausted the saboteur's patience is still a collapse.
   const towerGone = standing === 0 && G.peak > 0.5;
+  const over = G.integrity <= 0 || towerGone || G.patience <= 0;
+
+  // The round is scored by now, so neither of these can change what it was
+  // worth — the site is put back in order between rounds, not during one, and
+  // not at all if there is no next round to put it in order for. Bedding first:
+  // it reads the same poses the clearing does, and a block that is about to be
+  // hauled away is by definition not one that stood.
+  const bedded = (!over && hit) ? bedIn() : 0;
+  const hauled = over ? 0 : clearWreckage();
+  // Booked here and spent by the next build phase.
+  G.salvage = Math.min(CFG.salvageMax, Math.floor(hauled / Math.max(1, CFG.salvagePer)));
+
+  // The charges are reconciled by now, so this is the damage the round was
+  // actually judged on rather than the mid-siege overshoot.
+  Tele.round({ dmg, held, razed, hit, lost: lostMetres, killed: G.destroyedThisRound,
+               queue: G.queue, hauled, bedded, standing });
+  const gained = (G.mode === MODE.AUTO || isBuilder()) ? gainB : gainS;
+  updateHUD();
+
   if (G.integrity <= 0 || towerGone) { gameOver(dmg >= 2 || towerGone ? 'collapsed' : 'worn'); return; }
   if (G.patience <= 0) { gameOver('outlasted'); return; }
 
@@ -4739,17 +4999,23 @@ function finishRound() {
   const worst = G.queue.reduce((w, a) => (a.lost || 0) > (w ? w.lost : 0) ? a : w, null);
   const blame = worst && worst.lost >= 0.05 ? `  •  worst: ${worst.name} −${worst.lost.toFixed(2)}m` : '';
   const struts = `${G.integrity} strut${G.integrity === 1 ? '' : 's'} left`;
+  // What the site looks like going into the next round, said once, in the
+  // recap, where the numbers that explain it already are.
+  const site = hauled || bedded
+    ? '  •  ' + [hauled ? `${hauled} hauled off` : '', bedded ? `${bedded} bedded in` : '']
+        .filter(Boolean).join(', ')
+    : '';
   if (G.mode === MODE.AUTO || isBuilder()) {
     if (razed) toast('NOTHING STANDING', `+${gained}  •  the site is bare  •  ${struts}`, CFG.summaryTime - 0.3);
-    else if (flawless) toast('FLAWLESS', `+${gained}  •  intact: +1 Ward, saboteur patience ${G.patience}`, CFG.summaryTime - 0.3);
+    else if (flawless) toast('FLAWLESS', `+${gained}  •  intact: +1 Ward, saboteur patience ${G.patience}${site}`, CFG.summaryTime - 0.3);
     else if (held) toast('UNTROUBLED', `+${gained}  •  no attack came  •  saboteur patience ${G.patience}`, CFG.summaryTime - 0.3);
-    else if (dmg) toast('DAMAGED', `+${gained}  •  lost ${lostPct}% of height${blame}  •  ${struts}`, CFG.summaryTime - 0.3);
-    else toast('HELD', `+${gained}  •  lost ${lostPct}% of height${blame}`, CFG.summaryTime - 0.3);
+    else if (dmg) toast('DAMAGED', `+${gained}  •  lost ${lostPct}% of height${blame}  •  ${struts}${site}`, CFG.summaryTime - 0.3);
+    else toast('HELD', `+${gained}  •  lost ${lostPct}% of height${blame}${site}`, CFG.summaryTime - 0.3);
   } else {
     if (razed) toast('RAZED', `+${gained}  •  nothing left standing  •  ${struts}`, CFG.summaryTime - 0.3);
-    else if (dmg) toast('STRUT BROKEN', `+${gained}  •  tore off ${lostPct}% of the tower${blame}`, CFG.summaryTime - 0.3);
+    else if (dmg) toast('STRUT BROKEN', `+${gained}  •  tore off ${lostPct}% of the tower${blame}${site}`, CFG.summaryTime - 0.3);
     else if (held) toast('IT HELD', `+${gained}  •  clean round for the builder  •  patience ${G.patience}`, CFG.summaryTime - 0.3);
-    else toast('DAMAGE DONE', `+${gained}  •  took ${lostPct}% of the tower${blame}`, CFG.summaryTime - 0.3);
+    else toast('DAMAGE DONE', `+${gained}  •  took ${lostPct}% of the tower${blame}${site}`, CFG.summaryTime - 0.3);
   }
 }
 
@@ -5443,6 +5709,7 @@ function clearMatch() {
   G.anchors = CFG.startAnchors; G.wards = 0; G.attacksWeathered = 0; G.integrity = CFG.struts;
   G.patience = CFG.patience; G.energy = 0; G.destroyedThisRound = 0;
   G.razeGrace = CFG.razeGrace;
+  G.salvage = 0;
   G.keystones = 0; G.surge = false; document.body.dataset.surge = '0';
   document.getElementById('rowSurge').style.display = 'none';
   G.queue = []; G.atkIndex = -1; G.attacksThisRound = 0;
@@ -6484,6 +6751,8 @@ document.getElementById('cS3').textContent = `${CFG.patience} clean rounds and y
 AI.load();
 setHostSide(ROLE.BUILDER);
 for (const b of document.querySelectorAll('.spd')) b.classList.toggle('on', +b.dataset.spd === G.speed);
+document.getElementById('verLine').innerHTML =
+  `v${VERSION} <span class="r">·  rules ${RULES.tag}</span>`;
 renderTrain();
 updateHelp();
 updateHUD();
